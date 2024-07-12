@@ -139,7 +139,7 @@ plot_pcoa_and_permanova <- function(df, output_filename) {
   cat(paste("PCoA plot saved as", pdf_file, "\n"))
 }
 
-#------------------------------------Main code starts here----------------------------------------
+#----------------------------------------------------Main code starts here----------------------------------------------------
 
 # Create output directories if they don't exist
 if (!dir.exists("output_tables")) dir.create("output_tables")
@@ -315,7 +315,7 @@ for (i in seq_along(new_dataframes_list)) {
   }
 }
 
-#------------------------------differential abundance analysis
+#------------------------------------------------differential abundance analysis-------------------------------------------------
 # labdsv analysis
 famdata <- sp_pcoa_abund
 iva <- indval(famdata[,2:ncol(famdata)], famdata$Status)
