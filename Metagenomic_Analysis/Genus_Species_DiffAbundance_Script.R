@@ -6,6 +6,12 @@ library(labdsv)
 library(RColorBrewer)
 library(vegan)
 library(ape)
+library(vegan)
+library(SummarizedExperiment)
+library(TreeSummarizedExperiment)
+library(phyloseq)
+library(reshape2)
+library(ape)
 
 # Define parameters
 Colors <- c("darkolivegreen4", "red", "darkgreen", "salmon4")
@@ -35,7 +41,73 @@ move_status_to_first <- function(df) {
   return(df)
 }
 
-# Function to create boxplots for each dataframe and save as PDF
+# Function to subset a dataframe if columns and rows are provided as vectors
+subset_dataframe <- function(df, selected_columns, selected_rows) {
+  # Check if selected_columns is empty
+  if (length(selected_columns) == 1 && selected_columns == "") {
+    selected_columns <- colnames(df)
+  } else {
+    # Exclude columns that are not in the dataframe
+    selected_columns <- selected_columns[selected_columns %in% colnames(df)]
+  }
+  
+  # Check if selected_rows is empty
+  if (length(selected_rows) == 1 && selected_rows == "") {
+    selected_rows <- 1:nrow(df)
+  } else {
+    # Exclude rows that are not in the dataframe
+    selected_rows <- selected_rows[selected_rows %in% rownames(df)]
+  }
+  
+  # Subset the dataframe
+  df_subset <- df[selected_rows, selected_columns, drop = FALSE]
+  
+  return(df_subset)
+}
+
+#Function to merge two dataframes by rownames and add firstcolumn of df2 as first column of merged dataframe
+merge_by_rownames <- function(df1, df2) {
+  # Ensure rownames are set correctly
+  if (is.null(rownames(df1)) || is.null(rownames(df2))) {
+    stop("Both dataframes must have rownames.")
+  }
+  
+  # Merge dataframes by rownames
+  common_rownames <- intersect(rownames(df1), rownames(df2))
+  
+  # Subset dataframes by common rownames
+  df1_subset <- df1[common_rownames, , drop = FALSE]
+  df2_subset <- df2[common_rownames, , drop = FALSE]
+  
+  # Add the first column of df2 to df1 as the first column
+  df1_with_df2_first_col <- cbind(df2_subset[, 1, drop = FALSE], df1_subset)
+  
+  return(df1_with_df2_first_col)
+}
+
+# Split dataframe containing 'Status' in the first column as metadata, taxon, and count dataframes
+split_dataframe <- function(df) {
+  # Check if dataframe has at least one column
+  if (ncol(df) < 1) {
+    stop("Dataframe must have at least one column.")
+  }
+  
+  # Part 1: Dataframe containing rownames and the first column
+  sub_metadata <- data.frame(Status = df[, 1], row.names = rownames(df))
+  
+  # Part 2: Dataframe except the first column
+  sub_count <- df[, -1, drop = FALSE]
+  
+  # Part 3: Dataframe with column names as rownames and same column names in the first column as 'Taxon'
+  sub_taxa <- data.frame(Taxon = colnames(df), row.names = colnames(df))
+  
+  # Remove the first row of sub_taxa
+  sub_taxa <- sub_taxa[-1, , drop = FALSE]
+  
+  return(list(sub_metadata = sub_metadata, sub_count = sub_count, sub_taxa = sub_taxa))
+}
+
+#Function to create boxplots for each dataframe and save as PDF
 create_boxplots <- function(df, filename) {
   if (nrow(df) == 0) {
     cat(paste("Dataframe", filename, "has zero elements. Skipping...\n"))
@@ -77,7 +149,17 @@ create_boxplots <- function(df, filename) {
         num_cols <- 3
         num_rows <- 3
         
-        empty_plots <- 9 - length(plots_subset)
+        if (length(plots_subset) < 4) {
+          num_cols <- 3
+          num_rows <- 3
+          
+          if (length(plots_subset) < 2) {
+            num_cols <- 3
+            num_rows <- 3
+          }
+        }
+        
+        empty_plots <- (num_cols * num_rows) - length(plots_subset)
         for (i in 1:empty_plots) {
           plots_subset <- c(plots_subset, NULL)
         }
@@ -86,7 +168,7 @@ create_boxplots <- function(df, filename) {
         num_rows <- 3
       }
       
-      plot_grid <- do.call(grid.arrange, c(plots_subset, ncol = num_cols))
+      plot_grid <- do.call(grid.arrange, c(plots_subset, ncol = num_cols, nrow = num_rows))
       print(plot_grid)
     }
   }
@@ -95,7 +177,7 @@ create_boxplots <- function(df, filename) {
   cat(paste("PDF file", pdf_file, "created successfully.\n"))
 }
 
-# Function to plot PCoA and perform PERMANOVA
+# Function to plot PCoA using Bray-Curtis distance and perform PERMANOVA
 plot_pcoa_and_permanova <- function(df, output_filename) {
   class <- df$Status
   
@@ -113,9 +195,6 @@ plot_pcoa_and_permanova <- function(df, output_filename) {
   f_value <- adonis2_result$F[1]
   
   bray_pcoa_matrix_new <- cbind(bray_pcoa_matrix, class)
-  
-  output_data_file <- paste0("output_tables/CAZY_Healthy1lk_SE_Spainremoved_PCA_data_", output_filename, ".txt")
-  write.table(bray_pcoa_matrix_new, file = output_data_file, quote = FALSE, sep = '\t')
   
   pdf_file <- paste0("output_plots/PCOA_Plot_", output_filename, ".pdf")
   pdf(pdf_file, height = 10, width = 10)
@@ -139,11 +218,68 @@ plot_pcoa_and_permanova <- function(df, output_filename) {
   cat(paste("PCoA plot saved as", pdf_file, "\n"))
 }
 
-#----------------------------------------------------Main code starts here----------------------------------------------------
+# Function to do CLR transformatio and plot PCoA using Eucledian distance and perform PERMANOVA
+create_clr_pcoa_plot <- function(counts, samples, Colors, output_file) {
+  # Extract row names of df1
+  count_row_names <- row.names(counts)
+  
+  # Create new dataframe with one column 'Taxon' containing row names as values
+  tax <- data.frame(Taxon = count_row_names)
+  
+  # Set row names of df2 to be the same as the values in 'Taxon' column
+  row.names(tax) <- tax$Taxon
+  
+  # Create SummarizedExperiment object
+  se <- SummarizedExperiment(assays = list(counts = counts),
+                             colData = samples,
+                             rowData = tax)
+  tse <- as(se, "TreeSummarizedExperiment")
+  
+  # CLR transformation
+  tse <- transformAssay(tse, method = "clr", pseudocount = 1)
+  clr_assay <- t(assays(tse)$clr)
+  clr_assay_df <- as.data.frame(clr_assay)
+  
+  # Calculate Euclidean distances
+  euclidean_dist <- vegdist(clr_assay, method = "euclidean")
+  
+  # PCoA analysis
+  Uni_pcoa <- pcoa(as.matrix(euclidean_dist))
+  mds.var.per <- round(Uni_pcoa$values$Eigenvalues / sum(Uni_pcoa$values$Eigenvalues) * 100, 1)
+  pc <- c(1, 2)
+  
+  # PERMANOVA analysis
+  adonis_result <- adonis2(as.matrix(euclidean_dist) ~ samples$Status)
+  r_squared <- adonis_result$R2[1]
+  p_value <- adonis_result$Pr[1]
+  f_value <- adonis_result$F[1]
+  
+  # Create PCoA plot and save to PDF
+  pdf(output_file, height = 10, width = 10)
+  plot(Uni_pcoa$vectors[, 1:2], 
+       bg = Colors[as.factor(samples$Status)], 
+       pch = 21, cex = 2, 
+       xlab = paste0("PCoA", pc[1], " (", mds.var.per[1], "%)"), 
+       ylab = paste0("PCoA", pc[2], " (", mds.var.per[2], "%)"))
+  ordiellipse(Uni_pcoa$vectors[, 1:2], samples$Status, kind = "sd", lwd = 1, lty = 3, 
+              draw = "polygon", alpha = 50, col = Colors)
+  abline(h = 0, v = 0, col = "gray60")
+  
+  # Add R-squared, p-value, and F-value to the plot
+  legend("topright", legend = paste("R^2 =", round(r_squared, 3), 
+                                    "\nP =", round(p_value, 3), 
+                                    "\nF =", round(f_value, 3)), 
+         bty = "n")
+  dev.off()
+  return(clr_assay_df)
+}
+
+#------------------------------------Main code starts here----------------------------------------
 
 # Create output directories if they don't exist
 if (!dir.exists("output_tables")) dir.create("output_tables")
 if (!dir.exists("output_plots")) dir.create("output_plots")
+
 
 # Read data
 genus_count <- read.csv("kraken2_genus_readcount.txt", sep = "\t", header = TRUE, row.names = 1)
@@ -284,21 +420,17 @@ for (list_name in names(all_df_list)) {
 }
 
 # Save filtered_genus_abund to the output_tables directory
-write.table(filtered_genus_abund, file = "output_tables/filtered_genus_abund.txt", sep = "\t", quote = FALSE, row.names = TRUE)
+write.table(filtered_genus_abund, file = "output_tables/core_genus_abund.txt", sep = "\t", quote = FALSE, row.names = TRUE)
 
 # Transpose the species_abund dataframe and replace values < 0.002 with zero
 transposed_species_abund <- t(species_abund)
-transposed_species_abund[transposed_species_abund < 0.00001] <- 0
+transposed_species_count <- t(species_count)
+transposed_species_count[transposed_species_count < 100] <- 0
+transposed_species_count <- transposed_species_count[, colSums(transposed_species_count == 0) <= 4]
+columns_sel <- colnames(transposed_species_count)
 
-# Subset transposed_species_abund by excluding columns with more than 4 zeros
-subsetted_species_abund <- transposed_species_abund[, colSums(transposed_species_abund == 0) <= 4]
-
-# Match rownames of transposed_species_abund with rownames of metadata and add 'Status' column
-matching_rows <- intersect(rownames(metadata), rownames(subsetted_species_abund))
-sp_pcoa_abund <- as.data.frame(subsetted_species_abund[matching_rows, ])
-sp_pcoa_abund$Status <- metadata[matching_rows, "Status"]
-sp_pcoa_abund <- move_status_to_first(sp_pcoa_abund)
-
+sp_pcoa_abund <- as.data.frame(subset_dataframe(transposed_species_abund, columns_sel, c("")))
+sp_pcoa_abund <- merge_by_rownames(sp_pcoa_abund, metadata)
 # Print dimensions of the final dataframe for verification
 print(dim(sp_pcoa_abund))
 print(head(sp_pcoa_abund))
@@ -315,8 +447,13 @@ for (i in seq_along(new_dataframes_list)) {
   }
 }
 
-#------------------------------------------------differential abundance analysis-------------------------------------------------
+#------------------------------differential abundance analysis
 # labdsv analysis
+sp_pcoa_count <- as.data.frame(t(subset_dataframe(species_count ,c(""), colnames(sp_pcoa_abund))))
+sp_pcoa_count <- merge_by_rownames(sp_pcoa_count, metadata)
+write.table(sp_pcoa_count, file = "output_tables/filtered_species_count.txt", sep = "\t", quote = FALSE, row.names = TRUE)
+write.table(sp_pcoa_abund, file = "output_tables/filtered_species_abund.txt", sep = "\t", quote = FALSE, row.names = TRUE)
+
 famdata <- sp_pcoa_abund
 iva <- indval(famdata[,2:ncol(famdata)], famdata$Status)
 gr <- iva$maxcls[iva$pval <= 0.05]
@@ -326,11 +463,13 @@ fr <- apply(famdata[,2:ncol(famdata)] > 0, 2, sum)[iva$pval <= 0.05]
 indvalsummary <- data.frame(group = gr, indval = iv, pvalue = pv, freq = fr)
 indvalsummary <- indvalsummary[order(indvalsummary$group, -indvalsummary$indval),]
 subset_indvalsummary <- indvalsummary %>% filter(indval >= 0.5 & pvalue <= 0.05)
-write.table(indvalsummary, file = "labdsv_results.txt", sep = "\t")
+write.table(indvalsummary, file = "output_tables/labdsv_results.txt", sep = "\t")
 
 # Boruta analysis
 boruta.train <- Boruta(famdata[, 2:ncol(famdata)], as.factor(famdata$Status), pValue = 0.05, mcAdj = TRUE, maxRuns = 100, doTrace = 0, holdHistory = TRUE, getImp = getImpRfZ)
 boruta_decision <- as.data.frame(boruta.train$finalDecision)
+write.table(boruta_decision, file = "output_tables/boruta_results.txt", sep = "\t")
+
 colnames(boruta_decision)[1] <- "Decision"
 
 confirmed_df <- boruta_decision %>% filter(Decision == "Confirmed")
@@ -346,6 +485,59 @@ common_rows <- intersect(rownames(subset_indvalsummary), rownames(Boruta_conf_ge
 famdata_common <- famdata[, c(common_rows, "Status")]
 famdata_common <- famdata_common %>% select(Status, everything())
 
+#----------ANCOM-BC
+#famdata_common will be updated by including results from ANCOM-BC
+splitted_list <- split_dataframe(famdata)
+
+se <- SummarizedExperiment(assays = list(counts = t(splitted_list$sub_count)),
+                           colData = splitted_list$sub_metadata,
+                           rowData = splitted_list$sub_taxa)
+
+tse <- as(se, "TreeSummarizedExperiment")
+phy <- makePhyloseqFromTreeSE(tse)
+
+out = ancombc(
+  phyloseq = phy, 
+  formula = "Status", 
+  p_adj_method = "fdr", 
+  lib_cut = 0, 
+  group = "Status", 
+  struc_zero = TRUE, 
+  neg_lb = TRUE, 
+  tol = 1e-5, 
+  max_iter = 100, 
+  conserve = TRUE, 
+  alpha = 0.05, 
+  global = TRUE
+)
+
+res <- out$res
+write.table(res, file = "output_tables/ancom-bc_results.txt", sep = "\t")
+# Initialize vectors
+A_BL_Chow_ancombc_diff_tax <- c()
+B_BL_WSD_ancombc_diff_tax <- c()
+C_HF_Chow_ancombc_diff_tax <- c()
+D_HF_WSD_ancombc_diff_tax <- c()
+
+# Assign values to A_BL_Chow_ancombc_diff_tax if the second column is "TRUE"
+A_BL_Chow_ancombc_diff_tax <- out$res$diff_abn$taxon[out$res$diff_abn$`(Intercept)` == "TRUE"]
+B_BL_WSD_ancombc_diff_tax <- out$res$diff_abn$taxon[out$res$diff_abn$StatusB_BL_WSD == "TRUE"]
+C_HF_Chow_ancombc_diff_tax <- out$res$diff_abn$taxon[out$res$diff_abn$StatusC_HF_Chow == "TRUE"]
+D_HF_WSD_ancombc_diff_tax <- out$res$diff_abn$taxon[out$res$diff_abn$StatusD_HF_WSD == "TRUE"]
+
+# Combine all vectors into a single vector and ensure uniqueness
+ancombc_diff_tax_all <- unique(c(A_BL_Chow_ancombc_diff_tax, 
+                                 B_BL_WSD_ancombc_diff_tax, 
+                                 C_HF_Chow_ancombc_diff_tax, 
+                                 D_HF_WSD_ancombc_diff_tax))
+
+# Sort the combined vector
+ancombc_diff_tax_all <- sort(ancombc_diff_tax_all)
+common_diff_taxa <- intersect(colnames(famdata_common), ancombc_diff_tax_all)
+famdata_common_v2 <- subset_dataframe(famdata_common, common_diff_taxa, c(""))
+famdata_common_v2 <- merge_by_rownames(famdata_common_v2, metadata)
+#edit famdata_common
+#----------------
 A_BL_Chow_group <- rownames(indvalsummary)[indvalsummary$group == 1]
 B_BL_WSD_group <- rownames(indvalsummary)[indvalsummary$group == 2]
 C_HF_Chow_group <- rownames(indvalsummary)[indvalsummary$group == 3]
@@ -372,7 +564,7 @@ for (i in seq_along(group_vectors)) {
   group_name <- group_names[i]
   
   # Subset the dataframe
-  subsetted_data <- subset_famdata(group_vector, famdata_common)
+  subsetted_data <- subset_famdata(group_vector, famdata_common_v2)
   create_boxplots(subsetted_data, paste0(group_name, "_", group_name))
   # Reshape data for plotting
   famdata_common_long <- subsetted_data %>%
@@ -392,6 +584,20 @@ for (i in seq_along(group_vectors)) {
   # Print the plot to the PDF
   print(p)
 }
-
 # Close the PDF device
 dev.off()
+
+#----------------------------CLR transformation
+
+# Example usage
+clr_spec_abund <- create_clr_pcoa_plot(species_count, metadata, Colors, "output_plots/CLR-transform_species.pdf")
+selected_rows <- intersect(colnames(sp_pcoa_abund), rownames(species_count))
+species_count_subset <- subset_dataframe(species_count, c(""), selected_rows)
+clr_core_spec <- create_clr_pcoa_plot(species_count_subset, metadata, Colors, "output_plots/CLR-transform_subset_species.pdf")
+
+# Subset clr_spec_abund by matching column names
+selected_columns <- intersect(colnames(sp_pcoa_abund), colnames(clr_spec_abund))
+clr_spec_abund_subset <- subset_dataframe(clr_spec_abund, selected_columns, c(""))
+clr_spec_abund_subset <- merge_by_rownames(clr_spec_abund_subset, metadata)
+
+write.table(clr_spec_abund_subset, file = "output_tables/filtered_species_clr.txt", sep = "\t", quote = FALSE, row.names = TRUE)
