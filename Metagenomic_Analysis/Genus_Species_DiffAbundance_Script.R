@@ -23,7 +23,12 @@ normalize_column <- function(column) {
   column_sum <- sum(column)
   return(column / column_sum)
 }
-
+#
+log_transform <- function(data) {
+  logcounts <- log2(data + 1)
+  logcounts_matrix <- as.matrix(t(logcounts))
+  return(logcounts_matrix)
+}
 # Function to check if a row meets the first criterion (80% of columns > 0)
 check_80_percent <- function(row) {
   sum(row > 0) >= 0.8 * length(row)
@@ -601,3 +606,69 @@ clr_spec_abund_subset <- subset_dataframe(clr_spec_abund, selected_columns, c(""
 clr_spec_abund_subset <- merge_by_rownames(clr_spec_abund_subset, metadata)
 
 write.table(clr_spec_abund_subset, file = "output_tables/filtered_species_clr.txt", sep = "\t", quote = FALSE, row.names = TRUE)
+
+#----------------------------Log2 transformation
+
+# Apply log2 transformation to all values in the dataframe
+log2_species_count <- as.data.frame(log_transform(species_count))
+log2_spec_abund_subset <- subset_dataframe(log2_species_count, selected_columns, c(""))
+log2_spec_abund_subset <- merge_by_rownames(log2_spec_abund_subset, metadata)
+
+#---------------------------Perform Mantel test
+
+log2_spec_abund_subset 
+clr_spec_abund_subset
+sp_pcoa_abund
+
+clr_sp_euclidean_dist <- vegdist(clr_spec_abund_subset[,-1], method = "euclidean")
+log2_bray_distances <- vegdist(log2_spec_abund_subset[, -1], method = "bray")
+rel_bray_distances <- vegdist(sp_pcoa_abund[, -1], method = "bray")
+
+# List of dataframes (excluding the first column of each)
+ab_df_list <- list(
+  clr_spec_abund_subset = clr_spec_abund_subset[,-1],
+  log2_spec_abund_subset = log2_spec_abund_subset[,-1],
+  rel_spec_abund_subset = sp_pcoa_abund[,-1]
+)
+
+dist_df_list <- list(
+  clr_sp_euclidean_dist = clr_sp_euclidean_dist,
+  log2_bray_distances = log2_bray_distances,
+  rel_bray_distances = rel_bray_distances
+)
+
+# Function to perform Mantel test and store results
+perform_mantel_test <- function(df_list) {
+  results <- data.frame(
+    dataframe1 = character(),
+    dataframe2 = character(),
+    Mantel_statistic_r = numeric(),
+    Significance = numeric(),
+    stringsAsFactors = FALSE
+  )
+  
+  combinations <- combn(names(df_list), 2, simplify = FALSE)
+  
+  for (pair in combinations) {
+    mantel_result <- mantel(df_list[[pair[1]]], df_list[[pair[2]]], method = "spearman", permutations = 999)
+    results <- rbind(results, data.frame(
+      dataframe1 = pair[1],
+      dataframe2 = pair[2],
+      Mantel_statistic_r = mantel_result$statistic,
+      Significance = mantel_result$signif,
+      stringsAsFactors = FALSE
+    ))
+  }
+  
+  return(results)
+}
+
+# Perform Mantel tests and store results
+results_df <- perform_mantel_test(ab_df_list)
+results_dist <- perform_mantel_test(dist_df_list)
+
+print(results_df)
+print(results_dist)
+
+write.table(results_df, file = "output_tables/abundance_mantel_test.txt", sep = "\t", quote = FALSE, row.names = TRUE)
+write.table(results_dist, file = "output_tables/distance_mantel_test.txt", sep = "\t", quote = FALSE, row.names = TRUE)
