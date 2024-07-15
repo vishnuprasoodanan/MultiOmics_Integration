@@ -294,7 +294,8 @@ metadata <- read.csv("Metadata.txt", sep = "\t", header = TRUE, row.names = 1)
 # Normalize the genus and species counts
 genus_abund <- as.data.frame(apply(genus_count, 2, normalize_column))
 species_abund <- as.data.frame(apply(species_count, 2, normalize_column))
-
+clr_spec_abund <- create_clr_pcoa_plot(species_count, metadata, Colors, "output_plots/CLR-transform_species.pdf")
+log2_species_count <- as.data.frame(log_transform(species_count))
 # Apply criteria to filter rows
 rows_meeting_80_percent <- apply(genus_abund, 1, check_80_percent)
 rows_meeting_at_least_one <- apply(genus_abund, 1, check_at_least_one)
@@ -459,9 +460,6 @@ write.table(sp_pcoa_count, file = "output_tables/filtered_species_count.txt", se
 write.table(sp_pcoa_abund, file = "output_tables/filtered_species_abund.txt", sep = "\t", quote = FALSE, row.names = TRUE)
 
 #----------------------------CLR transformation
-
-# Example usage
-clr_spec_abund <- create_clr_pcoa_plot(species_count, metadata, Colors, "output_plots/CLR-transform_species.pdf")
 selected_rows <- intersect(colnames(sp_pcoa_abund), rownames(species_count))
 species_count_subset <- subset_dataframe(species_count, c(""), selected_rows)
 clr_core_spec <- create_clr_pcoa_plot(species_count_subset, metadata, Colors, "output_plots/CLR-transform_subset_species.pdf")
@@ -476,7 +474,6 @@ write.table(clr_spec_abund_subset, file = "output_tables/filtered_species_clr.tx
 #----------------------------Log2 transformation
 
 # Apply log2 transformation to all values in the dataframe
-log2_species_count <- as.data.frame(log_transform(species_count))
 log2_spec_abund_subset <- subset_dataframe(log2_species_count, selected_columns, c(""))
 log2_spec_abund_subset <- merge_by_rownames(log2_spec_abund_subset, metadata)
 write.table(log2_spec_abund_subset, file = "output_tables/filtered_species_log2.txt", sep = "\t", quote = FALSE, row.names = TRUE)
