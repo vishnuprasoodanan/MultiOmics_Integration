@@ -452,12 +452,37 @@ for (i in seq_along(new_dataframes_list)) {
   }
 }
 
-#------------------------------differential abundance analysis
-# labdsv analysis
+
 sp_pcoa_count <- as.data.frame(t(subset_dataframe(species_count ,c(""), colnames(sp_pcoa_abund))))
 sp_pcoa_count <- merge_by_rownames(sp_pcoa_count, metadata)
 write.table(sp_pcoa_count, file = "output_tables/filtered_species_count.txt", sep = "\t", quote = FALSE, row.names = TRUE)
 write.table(sp_pcoa_abund, file = "output_tables/filtered_species_abund.txt", sep = "\t", quote = FALSE, row.names = TRUE)
+
+#----------------------------CLR transformation
+
+# Example usage
+clr_spec_abund <- create_clr_pcoa_plot(species_count, metadata, Colors, "output_plots/CLR-transform_species.pdf")
+selected_rows <- intersect(colnames(sp_pcoa_abund), rownames(species_count))
+species_count_subset <- subset_dataframe(species_count, c(""), selected_rows)
+clr_core_spec <- create_clr_pcoa_plot(species_count_subset, metadata, Colors, "output_plots/CLR-transform_subset_species.pdf")
+
+# Subset clr_spec_abund by matching column names
+selected_columns <- intersect(colnames(sp_pcoa_abund), colnames(clr_spec_abund))
+clr_spec_abund_subset <- subset_dataframe(clr_spec_abund, selected_columns, c(""))
+clr_spec_abund_subset <- merge_by_rownames(clr_spec_abund_subset, metadata)
+
+write.table(clr_spec_abund_subset, file = "output_tables/filtered_species_clr.txt", sep = "\t", quote = FALSE, row.names = TRUE)
+
+#----------------------------Log2 transformation
+
+# Apply log2 transformation to all values in the dataframe
+log2_species_count <- as.data.frame(log_transform(species_count))
+log2_spec_abund_subset <- subset_dataframe(log2_species_count, selected_columns, c(""))
+log2_spec_abund_subset <- merge_by_rownames(log2_spec_abund_subset, metadata)
+write.table(log2_spec_abund_subset, file = "output_tables/filtered_species_log2.txt", sep = "\t", quote = FALSE, row.names = TRUE)
+
+#------------------------------differential abundance analysis
+# labdsv analysis
 
 famdata <- sp_pcoa_abund
 iva <- indval(famdata[,2:ncol(famdata)], famdata$Status)
@@ -487,11 +512,13 @@ Boruta_tent_genera <- famdata_t %>% filter(row.names(famdata_t) %in% row.names(t
 Boruta_tent_genera_t <- as.data.frame(t(Boruta_tent_genera))
 
 common_rows <- intersect(rownames(subset_indvalsummary), rownames(Boruta_conf_genera))
-famdata_common <- famdata[, c(common_rows, "Status")]
+famdata_common <- clr_spec_abund_subset[, c(common_rows, "Status")]
 famdata_common <- famdata_common %>% select(Status, everything())
 
 #----------ANCOM-BC
 #famdata_common will be updated by including results from ANCOM-BC
+rm(list = c("famdata"))
+famdata <- sp_pcoa_count
 splitted_list <- split_dataframe(famdata)
 
 se <- SummarizedExperiment(assays = list(counts = t(splitted_list$sub_count)),
@@ -512,7 +539,7 @@ out = ancombc(
   tol = 1e-5, 
   max_iter = 100, 
   conserve = TRUE, 
-  alpha = 0.05, 
+  alpha = 0.01, 
   global = TRUE
 )
 
@@ -591,28 +618,6 @@ for (i in seq_along(group_vectors)) {
 }
 # Close the PDF device
 dev.off()
-
-#----------------------------CLR transformation
-
-# Example usage
-clr_spec_abund <- create_clr_pcoa_plot(species_count, metadata, Colors, "output_plots/CLR-transform_species.pdf")
-selected_rows <- intersect(colnames(sp_pcoa_abund), rownames(species_count))
-species_count_subset <- subset_dataframe(species_count, c(""), selected_rows)
-clr_core_spec <- create_clr_pcoa_plot(species_count_subset, metadata, Colors, "output_plots/CLR-transform_subset_species.pdf")
-
-# Subset clr_spec_abund by matching column names
-selected_columns <- intersect(colnames(sp_pcoa_abund), colnames(clr_spec_abund))
-clr_spec_abund_subset <- subset_dataframe(clr_spec_abund, selected_columns, c(""))
-clr_spec_abund_subset <- merge_by_rownames(clr_spec_abund_subset, metadata)
-
-write.table(clr_spec_abund_subset, file = "output_tables/filtered_species_clr.txt", sep = "\t", quote = FALSE, row.names = TRUE)
-
-#----------------------------Log2 transformation
-
-# Apply log2 transformation to all values in the dataframe
-log2_species_count <- as.data.frame(log_transform(species_count))
-log2_spec_abund_subset <- subset_dataframe(log2_species_count, selected_columns, c(""))
-log2_spec_abund_subset <- merge_by_rownames(log2_spec_abund_subset, metadata)
 
 #---------------------------Perform Mantel test
 
