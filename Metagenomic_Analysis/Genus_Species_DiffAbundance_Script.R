@@ -46,6 +46,11 @@ move_status_to_first <- function(df) {
   return(df)
 }
 
+# Function to check if an element is not empty
+is_not_empty <- function(x) {
+  !is.null(x) && length(x) > 0
+}
+
 # Function to subset a dataframe if columns and rows are provided as vectors
 subset_dataframe <- function(df, selected_columns, selected_rows) {
   # Check if selected_columns is empty
@@ -110,6 +115,32 @@ split_dataframe <- function(df) {
   sub_taxa <- sub_taxa[-1, , drop = FALSE]
   
   return(list(sub_metadata = sub_metadata, sub_count = sub_count, sub_taxa = sub_taxa))
+}
+
+split_status_column <- function(df) {
+  # Check if the first column is named 'Status'
+  if (colnames(df)[1] != "Status") {
+    stop("Error: The first column is not named 'Status'")
+  }
+  
+  # Split the values in the 'Status' column based on '_'
+  split_values <- strsplit(as.character(df$Status), "_")
+  
+  # Extract the last value after splitting
+  last_values <- sapply(split_values, function(x) tail(x, n=1))
+  
+  # Extract the second last value after splitting
+  second_last_values <- sapply(split_values, function(x) ifelse(length(x) > 1, x[length(x) - 1], NA))
+  
+  # Create the two new dataframes
+  df_last <- df
+  df_last$Status <- last_values
+  
+  df_second_last <- df
+  df_second_last$Status <- second_last_values
+  
+  # Return the two dataframes
+  return(list(df_last = df_last, df_second_last = df_second_last))
 }
 
 #Function to create boxplots for each dataframe and save as PDF
@@ -279,12 +310,37 @@ create_clr_pcoa_plot <- function(counts, samples, Colors, output_file) {
   return(clr_assay_df)
 }
 
+# Function to perform Mantel test and store results
+perform_mantel_test <- function(df_list) {
+  results <- data.frame(
+    dataframe1 = character(),
+    dataframe2 = character(),
+    Mantel_statistic_r = numeric(),
+    Significance = numeric(),
+    stringsAsFactors = FALSE
+  )
+  
+  combinations <- combn(names(df_list), 2, simplify = FALSE)
+  
+  for (pair in combinations) {
+    mantel_result <- mantel(df_list[[pair[1]]], df_list[[pair[2]]], method = "spearman", permutations = 999)
+    results <- rbind(results, data.frame(
+      dataframe1 = pair[1],
+      dataframe2 = pair[2],
+      Mantel_statistic_r = mantel_result$statistic,
+      Significance = mantel_result$signif,
+      stringsAsFactors = FALSE
+    ))
+  }
+  
+  return(results)
+}
+
 #------------------------------------Main code starts here----------------------------------------
 
 # Create output directories if they don't exist
 if (!dir.exists("output_tables")) dir.create("output_tables")
 if (!dir.exists("output_plots")) dir.create("output_plots")
-
 
 # Read data
 genus_count <- read.csv("kraken2_genus_readcount.txt", sep = "\t", header = TRUE, row.names = 1)
@@ -440,7 +496,25 @@ sp_pcoa_abund <- merge_by_rownames(sp_pcoa_abund, metadata)
 # Print dimensions of the final dataframe for verification
 print(dim(sp_pcoa_abund))
 print(head(sp_pcoa_abund))
+sp_pcoa_count <- as.data.frame(t(subset_dataframe(species_count ,c(""), colnames(sp_pcoa_abund))))
+sp_pcoa_count <- merge_by_rownames(sp_pcoa_count, metadata)
+write.table(sp_pcoa_count, file = "output_tables/filtered_species_count.txt", sep = "\t", quote = FALSE, row.names = TRUE)
+write.table(sp_pcoa_abund, file = "output_tables/filtered_species_abund.txt", sep = "\t", quote = FALSE, row.names = TRUE)
+
 plot_pcoa_and_permanova(sp_pcoa_abund, "sp_pcoa_abund")
+plot_pcoa_and_permanova(sp_pcoa_count, "sp_pcoa_count")
+status_split_sp_pcoa_abund <- split_status_column(sp_pcoa_abund)
+status_split_sp_pcoa_count <- split_status_column(sp_pcoa_count)
+
+# Loop through each dataframe in the list and run the function
+for (df_name in names(status_split_sp_pcoa_abund)) {
+  # Get the dataframe from the list
+  df <- status_split_sp_pcoa_abund[[df_name]]
+  
+  # Call the function with the dataframe and its name
+  plot_pcoa_and_permanova(df, df_name)
+}
+
 # Perform PCoA and PERMANOVA for each dataframe in new_dataframes_list
 for (i in seq_along(new_dataframes_list)) {
   df <- new_dataframes_list[[i]]
@@ -452,17 +526,14 @@ for (i in seq_along(new_dataframes_list)) {
     cat("Skipping dataframe", df_name, "because it has less than 5 columns.\n")
   }
 }
-
-
-sp_pcoa_count <- as.data.frame(t(subset_dataframe(species_count ,c(""), colnames(sp_pcoa_abund))))
-sp_pcoa_count <- merge_by_rownames(sp_pcoa_count, metadata)
-write.table(sp_pcoa_count, file = "output_tables/filtered_species_count.txt", sep = "\t", quote = FALSE, row.names = TRUE)
-write.table(sp_pcoa_abund, file = "output_tables/filtered_species_abund.txt", sep = "\t", quote = FALSE, row.names = TRUE)
-
 #----------------------------CLR transformation
 selected_rows <- intersect(colnames(sp_pcoa_abund), rownames(species_count))
 species_count_subset <- subset_dataframe(species_count, c(""), selected_rows)
 clr_core_spec <- create_clr_pcoa_plot(species_count_subset, metadata, Colors, "output_plots/CLR-transform_subset_species.pdf")
+metadata_mouse_diet <- split_status_column(metadata)$df_last
+metadata_human_diet <- split_status_column(metadata)$df_second_last
+clr_core_spec_mouse_diet <- create_clr_pcoa_plot(species_count_subset, metadata_mouse_diet, Colors, "output_plots/CLR-transform_subset_species_mousediet.pdf")
+clr_core_spec_human_diet <- create_clr_pcoa_plot(species_count_subset, metadata_human_diet, Colors, "output_plots/CLR-transform_subset_species_humandiet.pdf")
 
 # Subset clr_spec_abund by matching column names
 selected_columns <- intersect(colnames(sp_pcoa_abund), colnames(clr_spec_abund))
@@ -479,143 +550,171 @@ log2_spec_abund_subset <- merge_by_rownames(log2_spec_abund_subset, metadata)
 write.table(log2_spec_abund_subset, file = "output_tables/filtered_species_log2.txt", sep = "\t", quote = FALSE, row.names = TRUE)
 
 #------------------------------differential abundance analysis
-# labdsv analysis
-
-famdata <- sp_pcoa_abund
-iva <- indval(famdata[,2:ncol(famdata)], famdata$Status)
-gr <- iva$maxcls[iva$pval <= 0.05]
-iv <- iva$indcls[iva$pval <= 0.05]
-pv <- iva$pval[iva$pval <= 0.05]
-fr <- apply(famdata[,2:ncol(famdata)] > 0, 2, sum)[iva$pval <= 0.05]
-indvalsummary <- data.frame(group = gr, indval = iv, pvalue = pv, freq = fr)
-indvalsummary <- indvalsummary[order(indvalsummary$group, -indvalsummary$indval),]
-subset_indvalsummary <- indvalsummary %>% filter(indval >= 0.5 & pvalue <= 0.05)
-write.table(indvalsummary, file = "output_tables/labdsv_results.txt", sep = "\t")
-
-# Boruta analysis
-boruta.train <- Boruta(famdata[, 2:ncol(famdata)], as.factor(famdata$Status), pValue = 0.05, mcAdj = TRUE, maxRuns = 100, doTrace = 0, holdHistory = TRUE, getImp = getImpRfZ)
-boruta_decision <- as.data.frame(boruta.train$finalDecision)
-write.table(boruta_decision, file = "output_tables/boruta_results.txt", sep = "\t")
-
-colnames(boruta_decision)[1] <- "Decision"
-
-confirmed_df <- boruta_decision %>% filter(Decision == "Confirmed")
-famdata_t <- as.data.frame(t(famdata))
-Boruta_conf_genera <- famdata_t %>% filter(row.names(famdata_t) %in% row.names(confirmed_df))
-Boruta_conf_genera_t <- as.data.frame(t(Boruta_conf_genera))
-
-tentative_df <- boruta_decision %>% filter(Decision == "Tentative")
-Boruta_tent_genera <- famdata_t %>% filter(row.names(famdata_t) %in% row.names(tentative_df))
-Boruta_tent_genera_t <- as.data.frame(t(Boruta_tent_genera))
-
-common_rows <- intersect(rownames(subset_indvalsummary), rownames(Boruta_conf_genera))
-famdata_common <- clr_spec_abund_subset[, c(common_rows, "Status")]
-famdata_common <- famdata_common %>% select(Status, everything())
-
-#----------ANCOM-BC
-#famdata_common will be updated by including results from ANCOM-BC
-rm(list = c("famdata"))
-famdata <- sp_pcoa_count
-splitted_list <- split_dataframe(famdata)
-
-se <- SummarizedExperiment(assays = list(counts = t(splitted_list$sub_count)),
-                           colData = splitted_list$sub_metadata,
-                           rowData = splitted_list$sub_taxa)
-
-tse <- as(se, "TreeSummarizedExperiment")
-phy <- makePhyloseqFromTreeSE(tse)
-
-out = ancombc(
-  phyloseq = phy, 
-  formula = "Status", 
-  p_adj_method = "fdr", 
-  lib_cut = 0, 
-  group = "Status", 
-  struc_zero = TRUE, 
-  neg_lb = TRUE, 
-  tol = 1e-5, 
-  max_iter = 100, 
-  conserve = TRUE, 
-  alpha = 0.01, 
-  global = TRUE
+# Put the dataframes into a list
+dataframe_list <- list(
+  sp_four_groups = sp_pcoa_count,
+  sp_mouse_diet = status_split_sp_pcoa_count$df_last,
+  sp_human_diet = status_split_sp_pcoa_count$df_second_last
 )
 
-res <- out$res
-write.table(res, file = "output_tables/ancom-bc_results.txt", sep = "\t")
-# Initialize vectors
-A_BL_Chow_ancombc_diff_tax <- c()
-B_BL_WSD_ancombc_diff_tax <- c()
-C_HF_Chow_ancombc_diff_tax <- c()
-D_HF_WSD_ancombc_diff_tax <- c()
+# Loop through the list and assign each dataframe to a new name 'famdata'
+for (name in names(dataframe_list)) {
+  
+  famdata <- dataframe_list[[name]]
+  
+  # Define the groups and their respective names
+  group_vectors <- list()
+  group_names <- sort(levels(as.factor(famdata$Status)))
+  
+  iva <- indval(famdata[,2:ncol(famdata)], famdata$Status)
+  gr <- iva$maxcls[iva$pval <= 0.05]
+  iv <- iva$indcls[iva$pval <= 0.05]
+  pv <- iva$pval[iva$pval <= 0.05]
+  fr <- apply(famdata[,2:ncol(famdata)] > 0, 2, sum)[iva$pval <= 0.05]
+  indvalsummary <- data.frame(group = gr, indval = iv, pvalue = pv, freq = fr)
+  indvalsummary <- indvalsummary[order(indvalsummary$group, -indvalsummary$indval),]
+  subset_indvalsummary <- indvalsummary %>% filter(indval >= 0.5 & pvalue <= 0.05)
+  write.table(indvalsummary, file = paste("output_tables/labdsv_summary_", name, ".txt", sep = ""), sep = "\t")
+  
+  # Boruta analysis
+  boruta.train <- Boruta(famdata[, 2:ncol(famdata)], as.factor(famdata$Status), pValue = 0.05, mcAdj = TRUE, maxRuns = 100, doTrace = 0, holdHistory = TRUE, getImp = getImpRfZ)
+  boruta_decision <- as.data.frame(boruta.train$finalDecision)
+  write.table(boruta_decision, file = paste("output_tables/Boruta_summary_", name, ".txt", sep = ""), sep = "\t")
+  
+  colnames(boruta_decision)[1] <- "Decision"
+  
+  confirmed_df <- boruta_decision %>% filter(Decision == "Confirmed")
+  famdata_t <- as.data.frame(t(famdata))
+  Boruta_conf_genera <- famdata_t %>% filter(row.names(famdata_t) %in% row.names(confirmed_df))
+  Boruta_conf_genera_t <- as.data.frame(t(Boruta_conf_genera))
+  
+  tentative_df <- boruta_decision %>% filter(Decision == "Tentative")
+  Boruta_tent_genera <- famdata_t %>% filter(row.names(famdata_t) %in% row.names(tentative_df))
+  Boruta_tent_genera_t <- as.data.frame(t(Boruta_tent_genera))
+  
+  common_rows <- intersect(rownames(subset_indvalsummary), rownames(Boruta_conf_genera))
+  famdata_common <- clr_spec_abund_subset[, c(common_rows, "Status")]
+  famdata_common <- famdata_common %>% select(Status, everything())
+  
+  #----------ANCOM-BC
+  #famdata_common will be updated by including results from ANCOM-BC
+  #rm(list = c("famdata"))
+  #famdata <- sp_pcoa_count
+  splitted_list <- split_dataframe(famdata)
+  
+  se <- SummarizedExperiment(assays = list(counts = t(splitted_list$sub_count)),
+                             colData = splitted_list$sub_metadata,
+                             rowData = splitted_list$sub_taxa)
+  
+  tse <- as(se, "TreeSummarizedExperiment")
+  phy <- makePhyloseqFromTreeSE(tse)
+  
+  out = ancombc(
+    phyloseq = phy, 
+    formula = "Status", 
+    p_adj_method = "fdr", 
+    lib_cut = 0, 
+    group = "Status", 
+    struc_zero = TRUE, 
+    neg_lb = TRUE, 
+    tol = 1e-5, 
+    max_iter = 100, 
+    conserve = TRUE, 
+    alpha = 0.01, 
+    global = TRUE
+  )
+  
+  res <- out$res
+  write.table(res, file = paste("output_tables/ANCOM-BC_summary_", name, ".txt", sep = ""), sep = "\t")
+  
+  ancombc_diff_tax_list <- list()
+  # Assign values to each dynamic variable based on the levels
+  for (level in group_names) {
+    # Create a variable name dynamically
+    variable_name <- paste(level, "ancombc_diff_tax", sep = "_")
+    
+    # Assign values to the dynamically created variable
+    if (level == group_names[1]) {
+      assign(variable_name, out$res$diff_abn$taxon[out$res$diff_abn$`(Intercept)` == "TRUE"])
+    } else {
+      column_name <- paste("Status", level, sep = "")
+      assign(variable_name, out$res$diff_abn$taxon[out$res$diff_abn[[column_name]] == "TRUE"])
+    }
+    ancombc_diff_tax_list[[variable_name]] <- get(variable_name)
+  }
+  
+  # Sort the combined vector
+  ancombc_diff_tax_all <- sort(unique(unlist(ancombc_diff_tax_list)))
+  common_diff_taxa <- intersect(colnames(famdata_common), ancombc_diff_tax_all)
+  famdata_common_v2 <- subset_dataframe(famdata_common, common_diff_taxa, c(""))
+  famdata_common_v2 <- merge_by_rownames(famdata_common_v2, metadata)
+  write.table(famdata_common_v2, file = paste("output_tables/diff_abund_", name, ".txt", sep = ""), sep = "\t")
+  #edit famdata_common
+  #----------------
 
-# Assign values to A_BL_Chow_ancombc_diff_tax if the second column is "TRUE"
-A_BL_Chow_ancombc_diff_tax <- out$res$diff_abn$taxon[out$res$diff_abn$`(Intercept)` == "TRUE"]
-B_BL_WSD_ancombc_diff_tax <- out$res$diff_abn$taxon[out$res$diff_abn$StatusB_BL_WSD == "TRUE"]
-C_HF_Chow_ancombc_diff_tax <- out$res$diff_abn$taxon[out$res$diff_abn$StatusC_HF_Chow == "TRUE"]
-D_HF_WSD_ancombc_diff_tax <- out$res$diff_abn$taxon[out$res$diff_abn$StatusD_HF_WSD == "TRUE"]
-
-# Combine all vectors into a single vector and ensure uniqueness
-ancombc_diff_tax_all <- unique(c(A_BL_Chow_ancombc_diff_tax, 
-                                 B_BL_WSD_ancombc_diff_tax, 
-                                 C_HF_Chow_ancombc_diff_tax, 
-                                 D_HF_WSD_ancombc_diff_tax))
-
-# Sort the combined vector
-ancombc_diff_tax_all <- sort(ancombc_diff_tax_all)
-common_diff_taxa <- intersect(colnames(famdata_common), ancombc_diff_tax_all)
-famdata_common_v2 <- subset_dataframe(famdata_common, common_diff_taxa, c(""))
-famdata_common_v2 <- merge_by_rownames(famdata_common_v2, metadata)
-#edit famdata_common
-#----------------
-A_BL_Chow_group <- rownames(indvalsummary)[indvalsummary$group == 1]
-B_BL_WSD_group <- rownames(indvalsummary)[indvalsummary$group == 2]
-C_HF_Chow_group <- rownames(indvalsummary)[indvalsummary$group == 3]
-D_HF_WSD_group <- rownames(indvalsummary)[indvalsummary$group == 4]
-
-# Function to subset famdata_common by common columns with group vector
-subset_famdata <- function(group_vector, famdata) {
-  common_cols <- intersect(colnames(famdata), group_vector)
-  subsetted_data <- famdata %>%
-    select(Status, all_of(common_cols))
-  return(subsetted_data)
+  group_labdsv <- character()
+  for (i in 1:length(group_names)) {
+    level <- group_names[i]
+    # Assign variable names dynamically
+    group_vectors[[level]] <- rownames(indvalsummary)[indvalsummary$group == i]
+    group_labdsv <- c(group_names)
+  }
+  
+  # Remove all empty elements from the list
+  group_vectors <- Filter(is_not_empty, group_vectors)
+  subset_famdata <- function(group_vectors, famdata) {
+    subsetted_data_list <- lapply(group_vectors, function(group_vector) {
+      common_cols <- intersect(colnames(famdata), group_vector)
+      subsetted_data <- famdata %>%
+        select(Status, all_of(common_cols))
+      return(subsetted_data)
+    })
+    return(subsetted_data_list)
+  }
+  # Create a PDF device to save the plots
+  pdf(paste("output_plots/diff_group_plots_", name, ".pdf", sep = ""))
+  
+  # Loop through each vector, subset the dataframe, and generate the plot
+  for (i in seq_along(group_vectors)) {
+    group_vector <- group_vectors[[i]]
+    group_name <- group_names[i]
+    
+    # Subset the dataframe using the function that handles lists
+    subsetted_data_list <- subset_famdata(group_vectors, famdata_common_v2)
+    # Function to remove data frames with only one column
+    remove_single_column_dfs <- function(list_of_dfs) {
+      # Filter out data frames with more than one column
+      list_of_dfs_filtered <- Filter(function(df) ncol(df) > 1, list_of_dfs)
+      return(list_of_dfs_filtered)
+    }
+    
+    # Apply the function to remove single-column data frames
+    subsetted_data_list <- remove_single_column_dfs(subsetted_data_list)
+    
+    subsetted_data <- subsetted_data_list[[i]]
+    
+    create_boxplots(subsetted_data, paste0(name, "_", group_name))
+    
+    # Reshape data for plotting
+    famdata_common_long <- subsetted_data %>%
+      tidyr::pivot_longer(cols = -Status, names_to = "Species", values_to = "Abundance")
+    
+    # Generate the plot
+    p <- ggplot(famdata_common_long, aes(x = Species, y = Abundance, fill = Status)) +
+      geom_boxplot(width = 0.7, position = position_dodge(width = 0.8), color = "black") +  # Adding black outline to boxplot
+      geom_jitter(aes(color = Status), size = 0.5, alpha = 0.7, position = position_dodge(width = 0.8)) +
+      labs(x = "Species", y = "Abundance", title = paste("Clustered Boxplot with Jittered Points -", group_name)) +
+      scale_fill_manual(values = Colors) +  # Use custom colors for fill
+      scale_color_manual(values = Colors) +  # Use custom colors for jittered points' outline
+      theme_minimal() +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+      coord_flip()  # Flip axes for better readability
+    
+    # Print the plot to the PDF
+    print(p)
+  }
+  dev.off()
 }
-
-# Define the groups and their respective names
-group_vectors <- list(A_BL_Chow_group, B_BL_WSD_group, C_HF_Chow_group, D_HF_WSD_group)
-group_names <- c("A_BL_Chow_group", "B_BL_WSD_group", "C_HF_Chow_group", "D_HF_WSD_group")
-
-# Create a PDF device to save the plots
-pdf("output_plots/group_plots.pdf")
-
-# Loop through each vector, subset the dataframe, and generate the plot
-for (i in seq_along(group_vectors)) {
-  group_vector <- group_vectors[[i]]
-  group_name <- group_names[i]
-  
-  # Subset the dataframe
-  subsetted_data <- subset_famdata(group_vector, famdata_common_v2)
-  create_boxplots(subsetted_data, paste0(group_name, "_", group_name))
-  # Reshape data for plotting
-  famdata_common_long <- subsetted_data %>%
-    tidyr::pivot_longer(cols = -Status, names_to = "Species", values_to = "Abundance")
-  
-  # Generate the plot
-  p <- ggplot(famdata_common_long, aes(x = Species, y = Abundance, fill = Status)) +
-    geom_boxplot(width = 0.7, position = position_dodge(width = 0.8), color = "black") +  # Adding black outline to boxplot
-    geom_jitter(aes(color = Status), size = 0.5, alpha = 0.7, position = position_dodge(width = 0.8)) +
-    labs(x = "Species", y = "Abundance", title = paste("Clustered Boxplot with Jittered Points -", group_name)) +
-    scale_fill_manual(values = Colors) +  # Use custom colors for fill
-    scale_color_manual(values = Colors) +  # Use custom colors for jittered points' outline
-    theme_minimal() +
-    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
-    coord_flip()  # Flip axes for better readability
-  
-  # Print the plot to the PDF
-  print(p)
-}
-# Close the PDF device
-dev.off()
-
 #---------------------------Perform Mantel test
 
 log2_spec_abund_subset 
@@ -638,32 +737,6 @@ dist_df_list <- list(
   log2_bray_distances = log2_bray_distances,
   rel_bray_distances = rel_bray_distances
 )
-
-# Function to perform Mantel test and store results
-perform_mantel_test <- function(df_list) {
-  results <- data.frame(
-    dataframe1 = character(),
-    dataframe2 = character(),
-    Mantel_statistic_r = numeric(),
-    Significance = numeric(),
-    stringsAsFactors = FALSE
-  )
-  
-  combinations <- combn(names(df_list), 2, simplify = FALSE)
-  
-  for (pair in combinations) {
-    mantel_result <- mantel(df_list[[pair[1]]], df_list[[pair[2]]], method = "spearman", permutations = 999)
-    results <- rbind(results, data.frame(
-      dataframe1 = pair[1],
-      dataframe2 = pair[2],
-      Mantel_statistic_r = mantel_result$statistic,
-      Significance = mantel_result$signif,
-      stringsAsFactors = FALSE
-    ))
-  }
-  
-  return(results)
-}
 
 # Perform Mantel tests and store results
 results_df <- perform_mantel_test(ab_df_list)
