@@ -593,9 +593,13 @@ for (name in names(dataframe_list)) {
   Boruta_tent_genera_t <- as.data.frame(t(Boruta_tent_genera))
   
   common_rows <- intersect(rownames(subset_indvalsummary), rownames(Boruta_conf_genera))
-  famdata_common <- clr_spec_abund_subset[, c(common_rows, "Status")]
-  famdata_common <- famdata_common %>% select(Status, everything())
+  famdata_common_clr <- clr_spec_abund_subset[, c(common_rows, "Status")]
+  famdata_common_log2 <- log2_spec_abund_subset[, c(common_rows, "Status")]
+  famdata_common <- sp_pcoa_count[, c(common_rows, "Status")]
   
+  famdata_common <- famdata_common %>% select(Status, everything())
+  famdata_common_clr <- famdata_common_clr %>% select(Status, everything())
+  famdata_common_log2 <- famdata_common_log2 %>% select(Status, everything())
   #----------ANCOM-BC
   #famdata_common will be updated by including results from ANCOM-BC
   #rm(list = c("famdata"))
@@ -648,7 +652,16 @@ for (name in names(dataframe_list)) {
   common_diff_taxa <- intersect(colnames(famdata_common), ancombc_diff_tax_all)
   famdata_common_v2 <- subset_dataframe(famdata_common, common_diff_taxa, c(""))
   famdata_common_v2 <- merge_by_rownames(famdata_common_v2, metadata)
-  write.table(famdata_common_v2, file = paste("output_tables/diff_abund_", name, ".txt", sep = ""), sep = "\t")
+  
+  famdata_common_clr_v2 <- subset_dataframe(famdata_common_clr, common_diff_taxa, c(""))
+  famdata_common_clr_v2 <- merge_by_rownames(famdata_common_clr_v2, metadata)
+  
+  famdata_common_log2_v2 <- subset_dataframe(famdata_common_log2, common_diff_taxa, c(""))
+  famdata_common_log2_v2 <- merge_by_rownames(famdata_common_log2_v2, metadata)
+  
+  write.table(famdata_common_v2, file = paste("output_tables/diff_count_", name, ".txt", sep = ""), sep = "\t")
+  write.table(famdata_common_clr_v2, file = paste("output_tables/diff_clr_", name, ".txt", sep = ""), sep = "\t")
+  write.table(famdata_common_log2_v2, file = paste("output_tables/diff_log2_", name, ".txt", sep = ""), sep = "\t")
   #edit famdata_common
   #----------------
 
@@ -680,7 +693,7 @@ for (name in names(dataframe_list)) {
     group_name <- group_names[i]
     
     # Subset the dataframe using the function that handles lists
-    subsetted_data_list <- subset_famdata(group_vectors, famdata_common_v2)
+    subsetted_data_list <- subset_famdata(group_vectors, famdata_common_clr_v2)
     # Function to remove data frames with only one column
     remove_single_column_dfs <- function(list_of_dfs) {
       # Filter out data frames with more than one column
