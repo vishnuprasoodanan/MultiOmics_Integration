@@ -346,6 +346,8 @@ if (!dir.exists("output_plots")) dir.create("output_plots")
 genus_count <- read.csv("kraken2_genus_readcount.txt", sep = "\t", header = TRUE, row.names = 1)
 species_count <- read.csv("kraken2_species_readcount.txt", sep = "\t", header = TRUE, row.names = 1)
 metadata <- read.csv("Metadata.txt", sep = "\t", header = TRUE, row.names = 1)
+species_count <- species_count[rownames(species_count) != "Homo sapiens", ]
+genus_count <- genus_count[rownames(genus_count) != "Homo", ]
 
 # Normalize the genus and species counts
 genus_abund <- as.data.frame(apply(genus_count, 2, normalize_column))
@@ -356,7 +358,6 @@ log2_species_count <- as.data.frame(log_transform(species_count))
 rows_meeting_80_percent <- apply(genus_abund, 1, check_80_percent)
 rows_meeting_at_least_one <- apply(genus_abund, 1, check_at_least_one)
 filtered_genus_abund <- genus_abund[rows_meeting_80_percent & rows_meeting_at_least_one, ]
-filtered_genus_abund <- filtered_genus_abund[rownames(filtered_genus_abund) != "Homo", ]
 
 # Identify core genera
 core_genera <- rownames(filtered_genus_abund)
@@ -596,10 +597,12 @@ for (name in names(dataframe_list)) {
   famdata_common_clr <- clr_spec_abund_subset[, c(common_rows, "Status")]
   famdata_common_log2 <- log2_spec_abund_subset[, c(common_rows, "Status")]
   famdata_common <- sp_pcoa_count[, c(common_rows, "Status")]
+  famdata_common_rel <- sp_pcoa_abund[, c(common_rows, "Status")]
   
   famdata_common <- famdata_common %>% select(Status, everything())
   famdata_common_clr <- famdata_common_clr %>% select(Status, everything())
   famdata_common_log2 <- famdata_common_log2 %>% select(Status, everything())
+  famdata_common_rel <- famdata_common_rel %>% select(Status, everything())
   #----------ANCOM-BC
   #famdata_common will be updated by including results from ANCOM-BC
   #rm(list = c("famdata"))
@@ -653,6 +656,9 @@ for (name in names(dataframe_list)) {
   famdata_common_v2 <- subset_dataframe(famdata_common, common_diff_taxa, c(""))
   famdata_common_v2 <- merge_by_rownames(famdata_common_v2, metadata)
   
+  famdata_common_rel_v2 <- subset_dataframe(famdata_common_rel, common_diff_taxa, c(""))
+  famdata_common_rel_v2 <- merge_by_rownames(famdata_common_rel_v2, metadata)
+  
   famdata_common_clr_v2 <- subset_dataframe(famdata_common_clr, common_diff_taxa, c(""))
   famdata_common_clr_v2 <- merge_by_rownames(famdata_common_clr_v2, metadata)
   
@@ -662,6 +668,7 @@ for (name in names(dataframe_list)) {
   write.table(famdata_common_v2, file = paste("output_tables/diff_count_", name, ".txt", sep = ""), sep = "\t")
   write.table(famdata_common_clr_v2, file = paste("output_tables/diff_clr_", name, ".txt", sep = ""), sep = "\t")
   write.table(famdata_common_log2_v2, file = paste("output_tables/diff_log2_", name, ".txt", sep = ""), sep = "\t")
+  write.table(famdata_common_rel_v2, file = paste("output_tables/diff_rel_", name, ".txt", sep = ""), sep = "\t")
   #edit famdata_common
   #----------------
 
