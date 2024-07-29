@@ -528,7 +528,7 @@ for (name in names(dataframe_list)) {
   # Use the function
   famdata_plant_animal_df <- split_and_summarize(famdata, Plant_Cell_Wall_Carbohydrates, Animal_Carbohydrates, Sucrose_Fructans, Mucin)
   famdata_plant_animal_df <- merge_by_rownames(famdata_plant_animal_df, metadata)
-  write.table(famdata_plant_animal_df, file = paste("output_tables/Plant_animal_mucins_", name, ".txt", sep = ""), sep = "\t")
+  #write.table(famdata_plant_animal_df, file = paste("output_tables/Plant_animal_mucins_", name, ".txt", sep = ""), sep = "\t")
   # Define the groups and their respective names
   group_vectors <- list()
   group_names <- sort(levels(as.factor(famdata$Status)))
@@ -627,13 +627,13 @@ for (name in names(dataframe_list)) {
   
   famdata_comm_plant_animal_df <- split_and_summarize(famdata_common_v2, Plant_Cell_Wall_Carbohydrates, Animal_Carbohydrates, Sucrose_Fructans, Mucin)
   famdata_comm_plant_animal_df <- remove_all_zero_rows_cols(famdata_comm_plant_animal_df)
-  #remove columns and rows containing all values zero
-  famdata_comm_plant_animal_clr_df <- clr_transformation(t(famdata_comm_plant_animal_df), metadata)
+  famdata_comm_plant_animal_df <- merge_by_rownames(famdata_comm_plant_animal_df, metadata)
+  #create_boxplots(famdata_comm_plant_animal_df, paste0("Plant_Animal_Mucin_", name))
   
   write.table(famdata_common_v2, file = paste("output_tables/diff_abund_", name, ".txt", sep = ""), sep = "\t")
   write.table(famdata_common_clr_v2, file = paste("output_tables/diff_abund_clr_", name, ".txt", sep = ""), sep = "\t")
   write.table(famdata_common_log2_v2, file = paste("output_tables/diff_abund_log2_", name, ".txt", sep = ""), sep = "\t")
-  write.table(famdata_comm_plant_animal_clr_df, file = paste("output_tables/Plant_animal_mucin_diff_abund_clr_", name, ".txt", sep = ""), sep = "\t")
+  #write.table(famdata_comm_plant_animal_clr_df, file = paste("output_tables/Plant_animal_mucin_diff_abund_clr_", name, ".txt", sep = ""), sep = "\t")
   #edit famdata_common
   #----------------
   
@@ -665,7 +665,8 @@ for (name in names(dataframe_list)) {
     group_name <- group_names[i]
     
     # Subset the dataframe using the function that handles lists
-    subsetted_data_list <- subset_famdata(group_vectors, famdata_common_clr_v2)
+    # Use what ever transformations you like (clr, rel or log2) instead of famdata_common_v2
+    subsetted_data_list <- subset_famdata(group_vectors, famdata_common_v2)
     # Function to remove data frames with only one column
     remove_single_column_dfs <- function(list_of_dfs) {
       # Filter out data frames with more than one column
@@ -679,6 +680,12 @@ for (name in names(dataframe_list)) {
     subsetted_data <- subsetted_data_list[[i]]
     
     create_boxplots(subsetted_data, paste0(name, "_", group_name))
+    
+    subsetted_comm_plant_animal_df <- split_and_summarize(subsetted_data, Plant_Cell_Wall_Carbohydrates, Animal_Carbohydrates, Sucrose_Fructans, Mucin)
+    subsetted_comm_plant_animal_df <- as.data.frame(remove_all_zero_rows_cols(subsetted_comm_plant_animal_df))
+    subsetted_comm_plant_animal_df <- merge_by_rownames(subsetted_comm_plant_animal_df, metadata)
+    print(subsetted_comm_plant_animal_df)
+    create_boxplots(subsetted_comm_plant_animal_df, paste0("Plant_Animal_Mucin_", name, "_", group_name))
     
     # Reshape data for plotting
     famdata_common_long <- subsetted_data %>%
