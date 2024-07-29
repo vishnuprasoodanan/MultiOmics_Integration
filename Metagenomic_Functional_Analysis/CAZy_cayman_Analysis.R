@@ -20,6 +20,23 @@ Colors <- c("darkolivegreen4", "red", "darkgreen", "salmon4")
 alpha_value <- 0.5
 circle_alpha <- 0.8
 
+# Plant, Animal, and Mucin vectors
+Plant_Cell_Wall_Carbohydrates <- c("GH1", "GH2", "GH3", "GH4", "GH5", "GH8", "GH9", "GH11", "GH12", "GH15", "GH16", "GH17", "GH26", "GH27", "GH28", "GH29", "GH36", "GH39", "GH43", "GH44", "GH48", "GH51", "GH53", "GH55", "GH67", "GH74", "GH78", "GH93", "GH94", "GH95", "GH115", "GH117", "GH121", "PL1", "PL2", "PL6", "PL7", "PL9", "PL11", "PL15", "PL22")
+Animal_Carbohydrates <- c("GH1", "GH2", "GH3", "GH4", "GH18", "GH19", "GH20", "GH29", "GH33", "GH38", "GH58", "GH79", "GH84", "GH85", "GH88", "GH89", "GH92", "GH95", "GH98", "GH99", "GH101", "GH105", "GH109", "GH110", "GH113", "PL6", "PL8", "PL12", "PL13", "PL21")
+Sucrose_Fructans <- c("GH32", "GH68", "GH70", "GH91")
+Mucin <- c("GH2", "GH20", "GH27", "GH29", "GH33", "GH35", "GH36", "GH95", "GH89", "GH110", "GH129")
+
+# function to remove rows and columns with all zero values
+remove_all_zero_rows_cols <- function(df) {
+  # Remove rows with all elements equal to zero
+  df <- df[rowSums(df != 0) > 0, ]
+  
+  # Remove columns with all elements equal to zero
+  df <- df[, colSums(df != 0) > 0]
+  
+  return(df)
+}
+
 # Function to normalize each row by dividing by the row sum
 rel_abundance <- function(df) {
   row_sums <- rowSums(df)
@@ -358,6 +375,65 @@ perform_mantel_test <- function(df_list) {
   
   return(results)
 }
+
+# Function to combine plant animal and mucins
+split_and_summarize <- function(df, 
+                                Plant_Cell_Wall_Carbohydrates, 
+                                Animal_Carbohydrates, 
+                                Sucrose_Fructans, 
+                                Mucin) {
+  
+  # Initialize empty lists to hold column names for each category
+  plant_cols <- c()
+  animal_cols <- c()
+  sucrose_cols <- c()
+  mucin_cols <- c()
+  
+  # Iterate through column names of the input dataframe
+  for (col_name in colnames(df)) {
+    # Split the column name by underscore
+    parts <- strsplit(col_name, "_")[[1]]
+    # Use the first part if split, otherwise use the entire name
+    first_part <- parts[1]
+    
+    # Check if the selected part is in any of the categories
+    if (first_part %in% Plant_Cell_Wall_Carbohydrates) {
+      plant_cols <- c(plant_cols, col_name)
+    }
+    if (first_part %in% Animal_Carbohydrates) {
+      animal_cols <- c(animal_cols, col_name)
+    }
+    if (first_part %in% Sucrose_Fructans) {
+      sucrose_cols <- c(sucrose_cols, col_name)
+    }
+    if (first_part %in% Mucin) {
+      mucin_cols <- c(mucin_cols, col_name)
+    }
+  }
+  
+  # Create dataframes for each category
+  Plant_Cell_Wall_Carbohydrates_df <- df %>% select(all_of(plant_cols))
+  Animal_Carbohydrates_df <- df %>% select(all_of(animal_cols))
+  Sucrose_Fructans_df <- df %>% select(all_of(sucrose_cols))
+  Mucin_df <- df %>% select(all_of(mucin_cols))
+  
+  # Calculate the sum of values for each row across all columns
+  Plant_Cell_Wall_Carbohydrates_df <- rowSums(Plant_Cell_Wall_Carbohydrates_df)
+  Animal_Carbohydrates_df <- rowSums(Animal_Carbohydrates_df)
+  Sucrose_Fructans_df <- rowSums(Sucrose_Fructans_df)
+  Mucin_df <- rowSums(Mucin_df)
+  
+  # Combine the sums into a single dataframe
+  combined_df <- data.frame(
+    Plant_Cell_Wall_Carbohydrates = Plant_Cell_Wall_Carbohydrates_df,
+    Animal_Carbohydrates = Animal_Carbohydrates_df,
+    Sucrose_Fructans = Sucrose_Fructans_df,
+    Mucin = Mucin_df
+  )
+  
+  return(combined_df)
+}
+
 #------------------------------------Main code starts here----------------------------------------
 
 # Create output directories if they don't exist
@@ -394,7 +470,7 @@ fun_rel_list <- list()
 # Loop through each dataframe in fun_count_list
 for (df_name in names(fun_count_list)) {
   df <- fun_count_list[[df_name]]
-
+  
   # Process the dataframe
   processed_df <- process_dataframe(df)
   
@@ -449,7 +525,10 @@ dataframe_list <- list(
 for (name in names(dataframe_list)) {
   
   famdata <- dataframe_list[[name]]
-  
+  # Use the function
+  famdata_plant_animal_df <- split_and_summarize(famdata, Plant_Cell_Wall_Carbohydrates, Animal_Carbohydrates, Sucrose_Fructans, Mucin)
+  famdata_plant_animal_df <- merge_by_rownames(famdata_plant_animal_df, metadata)
+  write.table(famdata_plant_animal_df, file = paste("output_tables/Plant_animal_mucins_", name, ".txt", sep = ""), sep = "\t")
   # Define the groups and their respective names
   group_vectors <- list()
   group_names <- sort(levels(as.factor(famdata$Status)))
@@ -541,14 +620,20 @@ for (name in names(dataframe_list)) {
   famdata_common_v2 <- subset_dataframe(famdata_common, common_diff_taxa, c(""))
   famdata_common_clr_v2 <- subset_dataframe(famdata_common_clr, common_diff_taxa, c(""))
   famdata_common_log2_v2 <- subset_dataframe(famdata_common_log2, common_diff_taxa, c(""))
-
+  
   famdata_common_v2 <- merge_by_rownames(famdata_common_v2, metadata)
   famdata_common_clr_v2 <- merge_by_rownames(famdata_common_clr_v2, metadata)
   famdata_common_log2_v2 <- merge_by_rownames(famdata_common_log2_v2, metadata)
-    
+  
+  famdata_comm_plant_animal_df <- split_and_summarize(famdata_common_v2, Plant_Cell_Wall_Carbohydrates, Animal_Carbohydrates, Sucrose_Fructans, Mucin)
+  famdata_comm_plant_animal_df <- remove_all_zero_rows_cols(famdata_comm_plant_animal_df)
+  #remove columns and rows containing all values zero
+  famdata_comm_plant_animal_clr_df <- clr_transformation(t(famdata_comm_plant_animal_df), metadata)
+  
   write.table(famdata_common_v2, file = paste("output_tables/diff_abund_", name, ".txt", sep = ""), sep = "\t")
   write.table(famdata_common_clr_v2, file = paste("output_tables/diff_abund_clr_", name, ".txt", sep = ""), sep = "\t")
   write.table(famdata_common_log2_v2, file = paste("output_tables/diff_abund_log2_", name, ".txt", sep = ""), sep = "\t")
+  write.table(famdata_comm_plant_animal_clr_df, file = paste("output_tables/Plant_animal_mucin_diff_abund_clr_", name, ".txt", sep = ""), sep = "\t")
   #edit famdata_common
   #----------------
   
