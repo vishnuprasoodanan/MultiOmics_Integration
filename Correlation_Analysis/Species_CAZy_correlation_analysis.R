@@ -42,17 +42,59 @@ count_repeats <- function(df) {
 count_repeats(all_corr_data)
 count_repeats(sub_corr_data)
 
-# Define the function to subset the dataframe
+# Function to subset the dataframe by selecting top 50 rows and columns with the largest number of non-zero values
 subset_nonzero <- function(df) {
-  # Remove rows with all elements equal to zero
-  df <- df[rowSums(df != 0) > 0, ]
+  # Count non-zero values in each row and column
+  nonzero_rows <- rowSums(df != 0)
+  nonzero_cols <- colSums(df != 0)
   
-  # Remove columns with all elements equal to zero
-  df <- df[, colSums(df != 0) > 0]
+  # Select top 50 rows and columns with the largest number of non-zero values
+  top_rows <- order(nonzero_rows, decreasing = TRUE)[1:min(50, length(nonzero_rows))]
+  top_cols <- order(nonzero_cols, decreasing = TRUE)[1:min(50, length(nonzero_cols))]
   
-  return(df)
+  # Subset the dataframe
+  subset_df <- df[top_rows, top_cols, drop = FALSE]
+  
+  return(subset_df)
 }
 
+# Function to report the number of positive, negative, and zero values in each row and column
+report_values <- function(df) {
+  if (nrow(df) == 0 || ncol(df) == 0) {
+    stop("The dataframe has no rows or columns.")
+  }
+  
+  # Ensure row names and column names are assigned
+  if (is.null(rownames(df))) {
+    rownames(df) <- paste0("Row", 1:nrow(df))
+  }
+  if (is.null(colnames(df))) {
+    colnames(df) <- paste0("Col", 1:ncol(df))
+  }
+  
+  report <- list()
+  
+  # Report for rows
+  row_report <- data.frame(
+    Row = rownames(df),
+    Positive = rowSums(df > 0),
+    Negative = rowSums(df < 0),
+    Zero = rowSums(df == 0)
+  )
+  
+  # Report for columns
+  col_report <- data.frame(
+    Column = colnames(df),
+    Positive = colSums(df > 0),
+    Negative = colSums(df < 0),
+    Zero = colSums(df == 0)
+  )
+  
+  report$rows <- row_report
+  report$columns <- col_report
+  
+  return(report)
+}
 
 # Get unique features
 species <- unique(all_corr_data$X_features)
@@ -165,9 +207,15 @@ for (pos in seq_len(nrow(zero_positions))) {
 print(unique_in_all_corr)
 # Subset the dataframe using the function
 subsetted_unique_in_all_corr <- subset_nonzero(unique_in_all_corr)
+# Subset the dataframe
+subsetted_unique_in_all_corr_sub <- subset_top_nonzero(subsetted_unique_in_all_corr)
+# Report the values
+subsetted_unique_in_all_corr_sub_report <- report_values(subsetted_unique_in_all_corr_sub)
+
 # Optionally: Write the new matrix to an output file
 write.table(subsetted_unique_in_all_corr, "unique_in_all_corr.txt", sep = "\t", col.names = NA)
-
+write.table(subsetted_unique_in_all_corr_sub, "high_corr_unique_in_all_corr.txt", sep = "\t", col.names = NA)
+write.table(subsetted_unique_in_all_corr_sub_report, "report_high_corr_unique_in_all_corr.txt", sep = "\t", col.names = NA)
 #-----------------------------------------------------------------------------------------------------------------------------------------
 # Step 2: Check the position of zeros in sub_corr_data_pw_matrix
 zero_positions2 <- which(all_corr_data_pw_matrix == 0, arr.ind = TRUE)
@@ -188,8 +236,15 @@ for (pos in seq_len(nrow(zero_positions2))) {
 print(unique_in_sub_corr)
 # Subset the dataframe using the function
 subsetted_unique_in_sub_corr <- subset_nonzero(unique_in_sub_corr)
+
+# Subset the dataframe
+subsetted_unique_in_sub_corr_sub <- subset_top_nonzero(subsetted_unique_in_sub_corr)
+# Report the values
+subsetted_unique_in_sub_corr_sub_report <- report_values(subsetted_unique_in_sub_corr_sub)
 # Optionally: Write the new matrix to an output file
 write.table(subsetted_unique_in_sub_corr, "unique_in_sub_corr.txt", sep = "\t", col.names = NA)
+write.table(subsetted_unique_in_sub_corr_sub, "high_corr_unique_in_sub_corr.txt", sep = "\t", col.names = NA)
+write.table(subsetted_unique_in_sub_corr_sub_report, "report_high_corr_unique_in_sub_corr.txt", sep = "\t", col.names = NA)
 
 #------------------------------------------------------------------------------------------------------------------------------------------
 # Step 1: Identify positions in sub_corr_data_pw_matrix with values between -5 and 5
@@ -217,8 +272,15 @@ if (is.matrix(range_positions) && nrow(range_positions) > 0) {
   print(increase_in_all_corr)
   # Subset the dataframe using the function
   subsetted_increase_in_all_corr <- subset_nonzero(increase_in_all_corr)
+  # Subset the dataframe
+  subsetted_increase_in_all_corr_sub <- subset_top_nonzero(subsetted_increase_in_all_corr)
+  # Report the values
+  subsetted_increase_in_all_corr_sub_report <- report_values(subsetted_increase_in_all_corr_sub)
   # Optionally: Write the new matrix to an output file
   write.table(subsetted_increase_in_all_corr, "Increased_in_all_corr.txt", sep = "\t", col.names = NA)
+  write.table(subsetted_increase_in_all_corr_sub, "high_corr_Increased_in_all_corr.txt", sep = "\t", col.names = NA)
+  write.table(subsetted_increase_in_all_corr_sub_report, "report_high_corr_Increased_in_all_corr.txt", sep = "\t", col.names = NA)
+  
 } else {
   message("No positions found in the specified range or invalid input data.")
 }
@@ -254,5 +316,3 @@ if (is.matrix(range_positions2) && nrow(range_positions2) > 0) {
 } else {
   message("No positions found in the specified range or invalid input data.")
 }
-
-
