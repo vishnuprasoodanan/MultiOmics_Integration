@@ -6,6 +6,45 @@ library(tidyr)
 all_corr_data <- read.csv("all_associations.txt", sep = "\t", header = TRUE)
 sub_corr_data <- read.csv("sub_associations.txt", sep = "\t", header = TRUE)
 
+create_heatmap <- function(df, output_file, h, w) {
+  library(ggplot2)
+  library(reshape2)
+  library(scales)  # For rescale function
+  
+  # Convert row names to a column
+  df <- cbind(Species = rownames(df), df)
+  rownames(df) <- NULL
+  
+  # Melt the dataframe for easier plotting
+  melted_df <- melt(df, id.vars = "Species", variable.name = "CAZy_Family", value.name = "Correlation")
+  
+  # Calculate the sizes based on the modulus of non-zero values
+  max_abs_value <- max(abs(melted_df$Correlation), na.rm = TRUE)
+  melted_df$Size <- ifelse(melted_df$Correlation != 0, abs(melted_df$Correlation) / max_abs_value, NA)
+  
+  # Create a color gradient for the correlation values
+  melted_df$Color <- ifelse(melted_df$Correlation > 0, "positive", "negative")
+  
+  # Generate a color palette for positive and negative values
+  color_palette <- scale_color_manual(values = c("positive" = "midnightblue", "negative" = "red4"))
+  
+  # Create the heatmap with ggplot2
+  p <- ggplot(melted_df, aes(x = CAZy_Family, y = Species, size = Size, fill = Correlation)) +
+    geom_point(shape = 21) +  # Use shape 21 to have fill without border
+    scale_size_continuous(range = c(0, 5), limits = c(0, 1), breaks = seq(0, 1, 0.2), labels = scales::percent) +  # Adjust size range
+    scale_fill_gradient2(low = "red4", mid = "white", high = "midnightblue", midpoint = 0, limits = c(-1, 1), oob = squish) +  # Set color gradient
+    theme_minimal() +  # Use a minimal theme to remove grey background
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      legend.position = "right",
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()
+    ) +
+    labs(title = "Correlation Heatmap", x = "CAZy Family", y = "Species", size = "Correlation Magnitude") +
+    guides(color = "none", size = guide_legend(title = "Correlation Magnitude"))
+  ggsave(filename = output_file, plot = p, device = "pdf", height = h, width = w, units = "in", limitsize = FALSE)
+}
+
 # Sanity check function
 sanity_check <- function(df) {
   # Check column names
@@ -42,8 +81,19 @@ count_repeats <- function(df) {
 count_repeats(all_corr_data)
 count_repeats(sub_corr_data)
 
-# Function to subset the dataframe by selecting top 50 rows and columns with the largest number of non-zero values
+# Define the function to subset the dataframe
 subset_nonzero <- function(df) {
+  # Remove rows with all elements equal to zero
+  df <- df[rowSums(df != 0) > 0, ]
+  
+  # Remove columns with all elements equal to zero
+  df <- df[, colSums(df != 0) > 0]
+  
+  return(df)
+}
+
+# Function to subset the dataframe by selecting top 50 rows and columns with the largest number of non-zero values
+subset_top_nonzero <- function(df) {
   # Count non-zero values in each row and column
   nonzero_rows <- rowSums(df != 0)
   nonzero_cols <- colSums(df != 0)
@@ -216,6 +266,7 @@ subsetted_unique_in_all_corr_sub_report <- report_values(subsetted_unique_in_all
 write.table(subsetted_unique_in_all_corr, "unique_in_all_corr.txt", sep = "\t", col.names = NA)
 write.table(subsetted_unique_in_all_corr_sub, "high_corr_unique_in_all_corr.txt", sep = "\t", col.names = NA)
 write.table(subsetted_unique_in_all_corr_sub_report, "report_high_corr_unique_in_all_corr.txt", sep = "\t", col.names = NA)
+create_heatmap(as.data.frame(subsetted_unique_in_all_corr_sub), "top_unique_in_all_heatmap.pdf", 15, 15)
 #-----------------------------------------------------------------------------------------------------------------------------------------
 # Step 2: Check the position of zeros in sub_corr_data_pw_matrix
 zero_positions2 <- which(all_corr_data_pw_matrix == 0, arr.ind = TRUE)
@@ -248,7 +299,7 @@ write.table(subsetted_unique_in_sub_corr_sub_report, "report_high_corr_unique_in
 
 #------------------------------------------------------------------------------------------------------------------------------------------
 # Step 1: Identify positions in sub_corr_data_pw_matrix with values between -5 and 5
-range_positions <- which(sub_corr_data_pw_matrix > -0.5 & sub_corr_data_pw_matrix < 0.5, arr.ind = TRUE)
+range_positions <- which(sub_corr_data_pw_matrix > -0.3 & sub_corr_data_pw_matrix < 0.3, arr.ind = TRUE)
 
 # Check if range_positions is a matrix and has rows to process
 if (is.matrix(range_positions) && nrow(range_positions) > 0) {
@@ -263,7 +314,7 @@ if (is.matrix(range_positions) && nrow(range_positions) > 0) {
     col_idx <- range_positions[pos, 2]
     all_corr_value <- all_corr_data_pw_matrix[row_idx, col_idx]
     
-    if (all_corr_value > 0.5 || all_corr_value < -0.5) {
+    if (all_corr_value > 0.3 || all_corr_value < -0.3) {
       increase_in_all_corr[row_idx, col_idx] <- all_corr_value
     }
   }
@@ -287,7 +338,7 @@ if (is.matrix(range_positions) && nrow(range_positions) > 0) {
 
 #------------------------------------------------------------------------------------------------------------------------------------------
 # Step 1: Identify positions in sub_corr_data_pw_matrix with values between -5 and 5
-range_positions2 <- which(sub_corr_data_pw_matrix < -0.5 & sub_corr_data_pw_matrix > 0.5, arr.ind = TRUE)
+range_positions2 <- which(sub_corr_data_pw_matrix < -0.3 & sub_corr_data_pw_matrix > 0.3, arr.ind = TRUE)
 
 # Check if range_positions is a matrix and has rows to process
 if (is.matrix(range_positions2) && nrow(range_positions2) > 0) {
@@ -302,7 +353,7 @@ if (is.matrix(range_positions2) && nrow(range_positions2) > 0) {
     col_idx <- range_positions2[pos, 2]
     all_corr_value <- all_corr_data_pw_matrix[row_idx, col_idx]
     
-    if (all_corr_value < 0.5 || all_corr_value > -0.5) {
+    if (all_corr_value < 0.3 || all_corr_value > -0.3) {
       decrease_in_all_corr[row_idx, col_idx] <- all_corr_value
     }
   }
@@ -316,3 +367,5 @@ if (is.matrix(range_positions2) && nrow(range_positions2) > 0) {
 } else {
   message("No positions found in the specified range or invalid input data.")
 }
+
+
