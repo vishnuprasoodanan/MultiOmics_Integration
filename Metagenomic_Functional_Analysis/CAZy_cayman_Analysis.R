@@ -15,6 +15,8 @@ library(ape)
 library(mia)
 library(Boruta)
 library(ANCOMBC)
+
+set.seed(123)
 # Define parameters
 Colors <- c("darkolivegreen4", "red", "darkgreen", "salmon4")
 alpha_value <- 0.5
@@ -24,19 +26,37 @@ circle_alpha <- 0.8
 Plant_Cell_Wall_Carbohydrates <- c("GH1", "GH2", "GH3", "GH4", "GH5", "GH8", "GH9", "GH11", "GH12", "GH15", "GH16", "GH17", "GH26", "GH27", "GH28", "GH29", "GH36", "GH39", "GH43", "GH44", "GH48", "GH51", "GH53", "GH55", "GH67", "GH74", "GH78", "GH93", "GH94", "GH95", "GH115", "GH117", "GH121", "PL1", "PL2", "PL6", "PL7", "PL9", "PL11", "PL15", "PL22")
 Animal_Carbohydrates <- c("GH1", "GH2", "GH3", "GH4", "GH18", "GH19", "GH20", "GH29", "GH33", "GH38", "GH58", "GH79", "GH84", "GH85", "GH88", "GH89", "GH92", "GH95", "GH98", "GH99", "GH101", "GH105", "GH109", "GH110", "GH113", "PL6", "PL8", "PL12", "PL13", "PL21")
 Sucrose_Fructans <- c("GH32", "GH68", "GH70", "GH91")
-Mucin <- c("GH2", "GH20", "GH27", "GH29", "GH33", "GH35", "GH36", "GH95", "GH89", "GH110", "GH129")
+Mucin <- c("GH2", "GH20", "GH27", "GH29", "GH33", "GH35", "GH36", "GH42", "GH95", "GH84", "GH85", "GH89", "GH98","GH101", "GH110", "GH129")
 
-# function to remove rows and columns with all zero values
+# # function to remove rows and columns with all zero values
+# remove_all_zero_rows_cols <- function(df) {
+#   # Remove rows with all elements equal to zero
+#   df <- df[rowSums(df != 0) > 0, ]
+#   
+#   # Remove columns with all elements equal to zero
+#   df <- df[, colSums(df != 0) > 0]
+#   
+#   return(df)
+# }
+
 remove_all_zero_rows_cols <- function(df) {
+  if (!is.data.frame(df)) {
+    stop("The input must be a data frame.")
+  }
+  
+  # Check if the data frame has zero rows or columns
+  if (nrow(df) == 0 || ncol(df) == 0) {
+    return(df)  # Nothing to clean if there are no rows or columns
+  }
+  
   # Remove rows with all elements equal to zero
-  df <- df[rowSums(df != 0) > 0, ]
+  df <- df[rowSums(df != 0) > 0, , drop = FALSE]
   
   # Remove columns with all elements equal to zero
-  df <- df[, colSums(df != 0) > 0]
+  df <- df[, colSums(df != 0) > 0, drop = FALSE]
   
   return(df)
 }
-
 # Function to normalize each row by dividing by the row sum
 rel_abundance <- function(df) {
   row_sums <- rowSums(df)
@@ -376,7 +396,9 @@ perform_mantel_test <- function(df_list) {
   return(results)
 }
 
-# Function to combine plant animal and mucins
+library(dplyr)
+
+# Function to combine plant, animal, sucrose, and mucins and return individual dataframes as well
 split_and_summarize <- function(df, 
                                 Plant_Cell_Wall_Carbohydrates, 
                                 Animal_Carbohydrates, 
@@ -418,20 +440,26 @@ split_and_summarize <- function(df,
   Mucin_df <- df %>% select(all_of(mucin_cols))
   
   # Calculate the sum of values for each row across all columns
-  Plant_Cell_Wall_Carbohydrates_df <- rowSums(Plant_Cell_Wall_Carbohydrates_df)
-  Animal_Carbohydrates_df <- rowSums(Animal_Carbohydrates_df)
-  Sucrose_Fructans_df <- rowSums(Sucrose_Fructans_df)
-  Mucin_df <- rowSums(Mucin_df)
+  Plant_Cell_Wall_Carbohydrates_sum <- rowSums(Plant_Cell_Wall_Carbohydrates_df)
+  Animal_Carbohydrates_sum <- rowSums(Animal_Carbohydrates_df)
+  Sucrose_Fructans_sum <- rowSums(Sucrose_Fructans_df)
+  Mucin_sum <- rowSums(Mucin_df)
   
   # Combine the sums into a single dataframe
   combined_df <- data.frame(
-    Plant_Cell_Wall_Carbohydrates = Plant_Cell_Wall_Carbohydrates_df,
-    Animal_Carbohydrates = Animal_Carbohydrates_df,
-    Sucrose_Fructans = Sucrose_Fructans_df,
-    Mucin = Mucin_df
+    Plant_Cell_Wall_Carbohydrates = Plant_Cell_Wall_Carbohydrates_sum,
+    Animal_Carbohydrates = Animal_Carbohydrates_sum,
+    Sucrose_Fructans = Sucrose_Fructans_sum,
+    Mucin = Mucin_sum
   )
   
-  return(combined_df)
+  return(list(
+    combined_df = combined_df,
+    Plant_Cell_Wall_Carbohydrates_df = Plant_Cell_Wall_Carbohydrates_df,
+    Animal_Carbohydrates_df = Animal_Carbohydrates_df,
+    Sucrose_Fructans_df = Sucrose_Fructans_df,
+    Mucin_df = Mucin_df
+  ))
 }
 
 #------------------------------------Main code starts here----------------------------------------
@@ -525,9 +553,43 @@ dataframe_list <- list(
 for (name in names(dataframe_list)) {
   
   famdata <- dataframe_list[[name]]
-  # Use the function
-  famdata_plant_animal_df <- split_and_summarize(famdata, Plant_Cell_Wall_Carbohydrates, Animal_Carbohydrates, Sucrose_Fructans, Mucin)
-  famdata_plant_animal_df <- merge_by_rownames(famdata_plant_animal_df, metadata)
+  all_result <- split_and_summarize(famdata, Plant_Cell_Wall_Carbohydrates, Animal_Carbohydrates, Sucrose_Fructans, Mucin)
+  # Combine the two lists into a list of lists
+  combined_results <- list(
+    ALL = all_result
+  )
+  # Iterate over the combined list
+  for (list_name in names(combined_results)) {
+    current_list <- combined_results[[list_name]]
+    # Get the names of the list elements
+    result_names <- names(current_list)
+    
+    # Split the names based on underscore and extract the first part
+    split_names <- strsplit(result_names, "_")
+    plot_names <- sapply(split_names, function(x) x[1])
+    # Loop through each dataframe in the current list
+    # Loop through each dataframe and create boxplots if the dataframe contains more than zero columns
+    for (i in seq_along(current_list)) {
+      df <- current_list[[i]]
+      plot_name <- plot_names[i]
+      df <- remove_all_zero_rows_cols(df)
+      num_rows <- nrow(df)
+      num_cols <- ncol(df)
+      message("After applying the function, the data frame has ", num_rows, " rows and ", num_cols, " columns.")
+      #Check if the dataframe contains more than zero columns
+      if (ncol(df) > 0 && nrow(df) > 0) {
+        # Call the function to create boxplots if the condition is met
+        df <- merge_by_rownames(df, metadata)
+        create_boxplots(df, paste0(plot_name, "_", name, "_", list_name))
+        write.table(df, file = paste("output_tables/diff_abund_", plot_name, "_", name, "_", list_name ,".txt", sep = ""), sep = "\t")
+      } else {
+        # Optional: print a message if the dataframe is empty
+        message(paste0("The input dataframe ", plot_name, " contains zero variables. Boxplots will not be created."))
+      }
+    }
+  }
+  
+
   #write.table(famdata_plant_animal_df, file = paste("output_tables/Plant_animal_mucins_", name, ".txt", sep = ""), sep = "\t")
   # Define the groups and their respective names
   group_vectors <- list()
@@ -626,6 +688,7 @@ for (name in names(dataframe_list)) {
   famdata_common_log2_v2 <- merge_by_rownames(famdata_common_log2_v2, metadata)
   
   famdata_comm_plant_animal_df <- split_and_summarize(famdata_common_v2, Plant_Cell_Wall_Carbohydrates, Animal_Carbohydrates, Sucrose_Fructans, Mucin)
+  famdata_comm_plant_animal_df <- famdata_comm_plant_animal_df$combined_df
   famdata_comm_plant_animal_df <- remove_all_zero_rows_cols(famdata_comm_plant_animal_df)
   famdata_comm_plant_animal_df <- merge_by_rownames(famdata_comm_plant_animal_df, metadata)
   #create_boxplots(famdata_comm_plant_animal_df, paste0("Plant_Animal_Mucin_", name))
@@ -660,10 +723,11 @@ for (name in names(dataframe_list)) {
   pdf(paste("output_plots/diff_group_plots_", name, ".pdf", sep = ""))
   
   # Loop through each vector, subset the dataframe, and generate the plot
+  
   for (i in seq_along(group_vectors)) {
     group_vector <- group_vectors[[i]]
     group_name <- group_names[i]
-    
+    print(paste0("CHECK!!!!!", group_name, group_vector))
     # Subset the dataframe using the function that handles lists
     # Use what ever transformations you like (clr, rel or log2) instead of famdata_common_v2
     subsetted_data_list <- subset_famdata(group_vectors, famdata_common_v2)
@@ -681,12 +745,44 @@ for (name in names(dataframe_list)) {
     
     create_boxplots(subsetted_data, paste0(name, "_", group_name))
     
-    subsetted_comm_plant_animal_df <- split_and_summarize(subsetted_data, Plant_Cell_Wall_Carbohydrates, Animal_Carbohydrates, Sucrose_Fructans, Mucin)
-    subsetted_comm_plant_animal_df <- as.data.frame(remove_all_zero_rows_cols(subsetted_comm_plant_animal_df))
-    subsetted_comm_plant_animal_df <- merge_by_rownames(subsetted_comm_plant_animal_df, metadata)
-    print(subsetted_comm_plant_animal_df)
-    create_boxplots(subsetted_comm_plant_animal_df, paste0("Plant_Animal_Mucin_", name, "_", group_name))
-    
+    # Plant Animal and Mucin
+    result <- split_and_summarize(subsetted_data, Plant_Cell_Wall_Carbohydrates, Animal_Carbohydrates, Sucrose_Fructans, Mucin)
+    # Use the function
+    # Combine the two lists into a list of lists
+    combined_results <- list(
+      DIFF = result
+    )
+    # Iterate over the combined list
+    for (list_name in names(combined_results)) {
+      current_list <- combined_results[[list_name]]
+      # Get the names of the list elements
+      result_names <- names(current_list)
+      
+      # Split the names based on underscore and extract the first part
+      split_names <- strsplit(result_names, "_")
+      plot_names <- sapply(split_names, function(x) x[1])
+      # Loop through each dataframe in the current list
+      # Loop through each dataframe and create boxplots if the dataframe contains more than zero columns
+      for (i in seq_along(current_list)) {
+        df <- current_list[[i]]
+        plot_name <- plot_names[i]
+        df <- remove_all_zero_rows_cols(df)
+        num_rows <- nrow(df)
+        num_cols <- ncol(df)
+        message("After applying the function, the data frame has ", num_rows, " rows and ", num_cols, " columns.")
+        #Check if the dataframe contains more than zero columns
+        if (ncol(df) > 0 && nrow(df) > 0) {
+          # Call the function to create boxplots if the condition is met
+          df <- merge_by_rownames(df, metadata)
+          create_boxplots(df, paste0(plot_name, "_", name, "_", group_name, "_", list_name))
+          write.table(df, file = paste("output_tables/diff_abund_", plot_name, "_", name, "_", group_name, "_", list_name ,".txt", sep = ""), sep = "\t")
+          } else {
+            # Optional: print a message if the dataframe is empty
+            message(paste0("The input dataframe ", plot_name, " contains zero variables. Boxplots will not be created."))
+          }
+      }
+    }
+
     # Reshape data for plotting
     famdata_common_long <- subsetted_data %>%
       tidyr::pivot_longer(cols = -Status, names_to = "Species", values_to = "Abundance")
@@ -707,6 +803,3 @@ for (name in names(dataframe_list)) {
   }
   dev.off()
 }
-
-
-#correlation between cazy and diff. abundant species
