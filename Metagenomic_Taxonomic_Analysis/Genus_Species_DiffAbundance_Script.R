@@ -12,7 +12,9 @@ library(TreeSummarizedExperiment)
 library(phyloseq)
 library(reshape2)
 library(ape)
-
+library(mia)
+library(Boruta)
+library(ANCOMBC)
 # Define parameters
 Colors <- c("darkolivegreen4", "red", "darkgreen", "salmon4")
 alpha_value <- 0.5
@@ -347,6 +349,9 @@ genus_count <- read.csv("kraken2_genus_readcount.txt", sep = "\t", header = TRUE
 species_count <- read.csv("kraken2_species_readcount.txt", sep = "\t", header = TRUE, row.names = 1)
 metadata <- read.csv("Metadata.txt", sep = "\t", header = TRUE, row.names = 1)
 species_count <- species_count[rownames(species_count) != "Homo sapiens", ]
+species_count <- species_count[!grepl("phage", rownames(species_count)), ]
+species_count <- species_count[!grepl("virus", rownames(species_count)), ]
+species_count <- species_count[!grepl("lactis", rownames(species_count)), ]
 genus_count <- genus_count[rownames(genus_count) != "Homo", ]
 
 # Normalize the genus and species counts
@@ -497,10 +502,25 @@ sp_pcoa_abund <- merge_by_rownames(sp_pcoa_abund, metadata)
 # Print dimensions of the final dataframe for verification
 print(dim(sp_pcoa_abund))
 print(head(sp_pcoa_abund))
+
+# Calculate the average values for each column excluding the first one named 'Status'
+average_values <- colMeans(sp_pcoa_abund[ , -1], na.rm = TRUE)
+
+# Sort the averages in descending order and select the top 30
+top_30_averages <- sort(average_values, decreasing = TRUE)[1:30]
+
+# Extract the column names of the top 30 average values
+top_30_species <- names(top_30_averages)
+
+top_30_sp_abund <- subset_dataframe(sp_pcoa_abund, top_30_species, c(""))
+top_30_sp_abund <- merge_by_rownames(top_30_sp_abund, metadata) 
+
 sp_pcoa_count <- as.data.frame(t(subset_dataframe(species_count ,c(""), colnames(sp_pcoa_abund))))
 sp_pcoa_count <- merge_by_rownames(sp_pcoa_count, metadata)
+
 write.table(sp_pcoa_count, file = "output_tables/filtered_species_count.txt", sep = "\t", quote = FALSE, row.names = TRUE)
 write.table(sp_pcoa_abund, file = "output_tables/filtered_species_abund.txt", sep = "\t", quote = FALSE, row.names = TRUE)
+write.table(top_30_sp_abund, file = "output_tables/top30_species_abund.txt", sep = "\t", quote = FALSE, row.names = TRUE)
 
 plot_pcoa_and_permanova(sp_pcoa_abund, "sp_pcoa_abund")
 plot_pcoa_and_permanova(sp_pcoa_count, "sp_pcoa_count")
@@ -540,16 +560,21 @@ clr_core_spec_human_diet <- create_clr_pcoa_plot(species_count_subset, metadata_
 selected_columns <- intersect(colnames(sp_pcoa_abund), colnames(clr_spec_abund))
 clr_spec_abund_subset <- subset_dataframe(clr_spec_abund, selected_columns, c(""))
 clr_spec_abund_subset <- merge_by_rownames(clr_spec_abund_subset, metadata)
+top_30_sp_clr <- subset_dataframe(clr_spec_abund_subset, top_30_species, c(""))
+top_30_sp_clr <- merge_by_rownames(top_30_sp_clr, metadata) 
 
 write.table(clr_spec_abund_subset, file = "output_tables/filtered_species_clr.txt", sep = "\t", quote = FALSE, row.names = TRUE)
-
+write.table(top_30_sp_clr, file = "output_tables/top30_species_clr.txt", sep = "\t", quote = FALSE, row.names = TRUE)
 #----------------------------Log2 transformation
 
 # Apply log2 transformation to all values in the dataframe
 log2_spec_abund_subset <- subset_dataframe(log2_species_count, selected_columns, c(""))
 log2_spec_abund_subset <- merge_by_rownames(log2_spec_abund_subset, metadata)
-write.table(log2_spec_abund_subset, file = "output_tables/filtered_species_log2.txt", sep = "\t", quote = FALSE, row.names = TRUE)
+top_30_sp_log2 <- subset_dataframe(log2_spec_abund_subset, top_30_species, c(""))
+top_30_sp_log2 <- merge_by_rownames(top_30_sp_log2, metadata)
 
+write.table(log2_spec_abund_subset, file = "output_tables/filtered_species_log2.txt", sep = "\t", quote = FALSE, row.names = TRUE)
+write.table(top_30_sp_log2, file = "output_tables/top30_species_log2.txt", sep = "\t", quote = FALSE, row.names = TRUE)
 #------------------------------differential abundance analysis
 # Put the dataframes into a list
 dataframe_list <- list(
@@ -574,7 +599,7 @@ for (name in names(dataframe_list)) {
   fr <- apply(famdata[,2:ncol(famdata)] > 0, 2, sum)[iva$pval <= 0.05]
   indvalsummary <- data.frame(group = gr, indval = iv, pvalue = pv, freq = fr)
   indvalsummary <- indvalsummary[order(indvalsummary$group, -indvalsummary$indval),]
-  subset_indvalsummary <- indvalsummary %>% filter(indval >= 0.5 & pvalue <= 0.05)
+  subset_indvalsummary <- indvalsummary %>% filter(indval >= 0.3 & pvalue <= 0.05)
   write.table(indvalsummary, file = paste("output_tables/labdsv_summary_", name, ".txt", sep = ""), sep = "\t")
   
   # Boruta analysis
