@@ -1,0 +1,4 @@
+for i in *.kreport ; do cut -f1,2,4,6 "$i" | tr -s ' '| awk '$3 == "G" {print}' | awk -F'\t' '{print $4 "\t" $2}' | awk '{sub(/^ */, "")} 1' | awk '{gsub(/  /, " ")}1' > "$i"_genus_readcount.txt; done;
+for i in *.kreport ; do cut -f1,2,4,6 "$i" | tr -s ' '| awk '$3 == "G" {print}' | awk -F'\t' '{print $4 "\t" $1}' | awk '{sub(/^ */, "")} 1' | awk '{gsub(/  /, " ")}1' > "$i"_genus_abundance.txt; done;
+for i in *.kreport ; do cut -f1,2,4,6 "$i" | tr -s ' '| awk '$3 == "S" {print}' | awk -F'\t' '{print $4 "\t" $2}' | awk '{sub(/^ */, "")} 1' | awk '{gsub(/  /, " ")}1' > "$i"_species_readcount.txt; done;
+for i in *.kreport ; do cut -f1,2,4,6 "$i" | tr -s ' '| awk '$3 == "S" {print}' | awk -F'\t' '{print $4 "\t" $1}' | awk '{sub(/^ */, "")} 1' | awk '{gsub(/  /, " ")}1' > "$i"_species_abundance.txt; done;
